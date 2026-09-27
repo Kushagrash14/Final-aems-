@@ -87,7 +87,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       message: 'OTP dispatched successfully',
-      devOtp: result.devOtp,
     });
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : 'Internal server error';

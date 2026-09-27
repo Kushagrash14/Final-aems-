@@ -50,6 +50,10 @@ function getValidatedEnv(): EnvConfig {
 
   const shared = { appUrl, cookieSecure, smtpEmail, smtpPassword, smtpHost, smtpPort, otpFromEmail };
 
+  if (isMockMode && process.env.NODE_ENV === 'production') {
+    throw new Error('[AEMS v2 FATAL] AEMS_MOCK_MODE=true is not allowed in production. Remove it from the environment.');
+  }
+
   // If mock mode is explicitly true, allow running for local offline UI demo
   if (isMockMode) {
     return {

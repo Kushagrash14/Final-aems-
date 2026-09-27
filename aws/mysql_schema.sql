@@ -461,24 +461,18 @@ INSERT IGNORE INTO plants (id, location_id, name, code) VALUES
   ('22222222-2222-2222-2222-222222222203', '11111111-1111-1111-1111-111111111101', 'PGEL', 'PGEL');
 
 INSERT IGNORE INTO users (id, email, full_name, phone, role, is_active) VALUES
-  ('00000000-0000-0000-0000-000000000001', 'itadmin@pgel.in', 'IT Admin (AEMS Root)', '+91 98765 43210', 'it_admin', 1),
-  ('00000000-0000-0000-0000-000000000002', 'plant.admin@pgel.in', 'Rajesh Sharma (Plant Admin)', '+91 98765 43211', 'admin', 1),
-  ('00000000-0000-0000-0000-000000000003', 'hr.lead@pgel.in', 'Pooja Verma (HR Lead)', '+91 98765 43212', 'hr', 1),
-  ('00000000-0000-0000-0000-000000000004', 'operator1@pgel.in', 'Amit Kumar (Floor User)', '+91 98765 43213', 'user', 1);
+  ('00000000-0000-0000-0000-000000000001', 'software.2040@pgel.in', 'Software Team (IT Admin)', NULL, 'it_admin', 1);
 
 INSERT IGNORE INTO user_scopes (user_id, can_edit, category_ids, location_ids, plant_ids) VALUES
-  ('00000000-0000-0000-0000-000000000001', 1, NULL, NULL, NULL),
-  ('00000000-0000-0000-0000-000000000002', 1, NULL, JSON_ARRAY('11111111-1111-1111-1111-111111111101'), JSON_ARRAY('22222222-2222-2222-2222-222222222201', '22222222-2222-2222-2222-222222222202')),
-  ('00000000-0000-0000-0000-000000000003', 1, NULL, NULL, NULL),
-  ('00000000-0000-0000-0000-000000000004', 1, NULL, NULL, NULL);
+  ('00000000-0000-0000-0000-000000000001', 1, NULL, NULL, NULL);
 
 INSERT IGNORE INTO departments (id, name, code, admin_user_id) VALUES
   ('33333333-3333-3333-3333-333333333301', 'Information Technology', 'DEPT-IT', '00000000-0000-0000-0000-000000000001'),
-  ('33333333-3333-3333-3333-333333333302', 'Production & Assembly', 'DEPT-PROD', '00000000-0000-0000-0000-000000000002'),
-  ('33333333-3333-3333-3333-333333333303', 'Quality Assurance', 'DEPT-QA', '00000000-0000-0000-0000-000000000002'),
-  ('33333333-3333-3333-3333-333333333304', 'Human Resources', 'DEPT-HR', '00000000-0000-0000-0000-000000000003'),
-  ('33333333-3333-3333-3333-333333333305', 'Plant Maintenance & Electrical', 'DEPT-MAINT', '00000000-0000-0000-0000-000000000002'),
-  ('33333333-3333-3333-3333-333333333306', 'Health, Safety & Environment', 'DEPT-HSE', '00000000-0000-0000-0000-000000000002');
+  ('33333333-3333-3333-3333-333333333302', 'Production & Assembly', 'DEPT-PROD', '00000000-0000-0000-0000-000000000001'),
+  ('33333333-3333-3333-3333-333333333303', 'Quality Assurance', 'DEPT-QA', '00000000-0000-0000-0000-000000000001'),
+  ('33333333-3333-3333-3333-333333333304', 'Human Resources', 'DEPT-HR', '00000000-0000-0000-0000-000000000001'),
+  ('33333333-3333-3333-3333-333333333305', 'Plant Maintenance & Electrical', 'DEPT-MAINT', '00000000-0000-0000-0000-000000000001'),
+  ('33333333-3333-3333-3333-333333333306', 'Health, Safety & Environment', 'DEPT-HSE', '00000000-0000-0000-0000-000000000001');
 
 INSERT IGNORE INTO categories (id, name, code, description, icon) VALUES
   ('44444444-4444-4444-4444-444444444401', 'IT', 'CAT-IT', 'Laptops, Desktops, Servers, Switches, Printers', 'Laptop'),
@@ -511,16 +505,6 @@ INSERT IGNORE INTO category_form_fields (category_id, field_name, field_label, f
   ('44444444-4444-4444-4444-444444444407', 'reg_number', 'Vehicle Registration No.', 'text', NULL, 1, 1, 'e.g. UP 16 AB 1234'),
   ('44444444-4444-4444-4444-444444444407', 'chassis_number', 'Chassis / Engine Number', 'text', NULL, 0, 2, 'Chassis Number'),
   ('44444444-4444-4444-4444-444444444407', 'insurance_expiry', 'Insurance Expiry Date', 'date', NULL, 1, 3, 'Insurance Due Date');
-
-INSERT IGNORE INTO employees (id, emp_code, full_name, email, phone, designation, department_id, plant_id, location_id, status) VALUES
-  ('55555555-5555-5555-5555-555555555501', 'EMP-10482', 'Sunil Deshmukh', 'sunil.d@pgel.in', '+91 98234 11223', 'Senior Production Engineer', '33333333-3333-3333-3333-333333333302', '22222222-2222-2222-2222-222222222201', '11111111-1111-1111-1111-111111111101', 'active'),
-  ('55555555-5555-5555-5555-555555555502', 'EMP-10519', 'Neha Kulkarni', 'neha.k@pgel.in', '+91 98234 22334', 'Quality Inspector', '33333333-3333-3333-3333-333333333303', '22222222-2222-2222-2222-222222222201', '11111111-1111-1111-1111-111111111101', 'active'),
-  ('55555555-5555-5555-5555-555555555503', 'EMP-10640', 'Vikram Rathore', 'vikram.r@pgel.in', '+91 98234 33445', 'IT Support Specialist', '33333333-3333-3333-3333-333333333301', '22222222-2222-2222-2222-222222222202', '11111111-1111-1111-1111-111111111101', 'active');
-
-INSERT IGNORE INTO pm_machines (id, machine_code, machine_name, plant_id, location_id, department_id, pm_frequency_days, last_pm_date, next_pm_date, qr_code_token, status) VALUES
-  ('66666666-6666-6666-6666-666666666601', 'MCH-IM-01', 'Toshiba 450T Injection Molding Press #1', '22222222-2222-2222-2222-222222222201', '11111111-1111-1111-1111-111111111101', '33333333-3333-3333-3333-333333333302', 30, CURDATE() - INTERVAL 25 DAY, CURDATE() + INTERVAL 5 DAY, 'mch_token_im01_pgel', 'operational'),
-  ('66666666-6666-6666-6666-666666666602', 'MCH-AC-04', 'Atlas Copco 75kW Air Compressor Unit B', '22222222-2222-2222-2222-222222222202', '11111111-1111-1111-1111-111111111101', '33333333-3333-3333-3333-333333333305', 45, CURDATE() - INTERVAL 50 DAY, CURDATE() - INTERVAL 5 DAY, 'mch_token_ac04_pgel', 'breakdown'),
-  ('66666666-6666-6666-6666-666666666603', 'MCH-SMT-02', 'Yamaha High-Speed SMT Pick & Place', '22222222-2222-2222-2222-222222222202', '11111111-1111-1111-1111-111111111101', '33333333-3333-3333-3333-333333333302', 15, CURDATE() - INTERVAL 10 DAY, CURDATE() + INTERVAL 5 DAY, 'mch_token_smt02_pgel', 'operational');
 
 INSERT IGNORE INTO email_templates (template_key, subject, body_html, description) VALUES
   ('pm_overdue_alert', 'URGENT: Machine Maintenance Overdue — {{machine_code}} ({{machine_name}})', '<p>Dear Team,</p><p>Machine <strong>{{machine_name}}</strong> (Code: <code>{{machine_code}}</code>) at <strong>{{plant_name}}</strong> has exceeded its scheduled PM due date of <strong>{{due_date}}</strong>.</p><p>Please assign a maintenance technician immediately.</p>', 'Triggered when PM schedule is past due date'),

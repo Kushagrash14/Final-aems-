@@ -2797,18 +2797,11 @@ export async function createDamageScrapReport(params: {
     if (!empEmail) empEmail = asset.assigned_employee.email || null;
   }
 
-  let validReporterId = params.reportedBy;
+  const validReporterId = params.reportedBy;
   if (!env.isMockMode) {
-    if (validReporterId) {
-      const { data: userCheck } = await db.from('users').select('id').eq('id', validReporterId).single();
-      if (!userCheck) {
-        const { data: firstUser } = await db.from('users').select('id').limit(1).single();
-        validReporterId = firstUser?.id || '00000000-0000-0000-0000-000000000001';
-      }
-    } else {
-      const { data: firstUser } = await db.from('users').select('id').limit(1).single();
-      validReporterId = firstUser?.id || '00000000-0000-0000-0000-000000000001';
-    }
+    if (!validReporterId) throw new Error('A signed-in reporter is required to file this report.');
+    const { data: userCheck } = await db.from('users').select('id').eq('id', validReporterId).maybeSingle();
+    if (!userCheck) throw new Error('Reporter account not found. Please sign in again.');
   }
 
   const isMissingReport = params.reportType === 'missing';
@@ -3087,13 +3080,10 @@ export async function resolveDamageMissingReport(params: {
     return;
   }
 
-  let validReviewerId = params.reviewerId;
+  const validReviewerId = params.reviewerId;
   if (!env.isMockMode && validReviewerId) {
-    const { data: revCheck } = await db.from('users').select('id').eq('id', validReviewerId).single();
-    if (!revCheck) {
-      const { data: firstUser } = await db.from('users').select('id').limit(1).single();
-      validReviewerId = firstUser?.id || '00000000-0000-0000-0000-000000000001';
-    }
+    const { data: revCheck } = await db.from('users').select('id').eq('id', validReviewerId).maybeSingle();
+    if (!revCheck) throw new Error('Reviewer account not found. Please sign in again.');
   }
 
   // Update DB report with fallback if resolution_status column is missing
@@ -3331,13 +3321,10 @@ export async function reviewDamageScrapReport(params: {
     return;
   }
 
-  let validReviewerId = params.reviewerId;
+  const validReviewerId = params.reviewerId;
   if (validReviewerId) {
     const { data: revCheck } = await db.from('users').select('id').eq('id', validReviewerId).maybeSingle();
-    if (!revCheck) {
-      const { data: firstUser } = await db.from('users').select('id').limit(1).maybeSingle();
-      validReviewerId = firstUser?.id || '00000000-0000-0000-0000-000000000001';
-    }
+    if (!revCheck) throw new Error('Reviewer account not found. Please sign in again.');
   }
 
   const { error: reportError } = await db

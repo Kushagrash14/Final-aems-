@@ -13,7 +13,7 @@
    ```bash
    mysql -h <rds-endpoint> -u admin -p aems < aws/mysql_schema.sql
    ```
-   Seeded login: `itadmin@pgel.in` (IT Admin). Change/add real users from **User Management** after first login.
+   Seeded login: `software.2040@pgel.in` (IT Admin). Change/add real users from **User Management** after first login.
 
 ## 2. S3 bucket (attachments)
 1. Create a bucket (e.g. `aems-attachments`), region `ap-south-1`, **Block all public access: ON**.
@@ -63,6 +63,6 @@ cd /opt/aems && git pull && npm ci && npm run build && pm2 restart aems
 ```
 
 ## Notes
-- OTP emails use Office 365 SMTP. If SMTP fails, the OTP is written to `pm2 logs aems` so an admin can still sign in.
-- `AEMS_DEV_OTP_IN_RESPONSE` and `AEMS_MOCK_MODE` must stay `false` in production.
+- OTP emails use Office 365 SMTP. OTPs are never logged or returned by the API; if SMTP fails, login fails with an error. IT Admin can verify SMTP at `GET /api/auth/test-smtp`.
+- The app refuses to start in production if `AEMS_MOCK_MODE=true` is set.
 - Old base64 attachments keep working; new uploads go to S3.

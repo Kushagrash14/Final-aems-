@@ -20,10 +20,6 @@ interface MockOTP {
 }
 const mockOtpStore: MockOTP[] = ((globalThis as unknown as { __aems_otps?: MockOTP[] }).__aems_otps ??= []);
 
-// Returning the OTP in the API response is only allowed in mock mode or when
-// explicitly enabled for automated testing. Never enable this in production.
-const exposeOtpInResponse = env.isMockMode || process.env.AEMS_DEV_OTP_IN_RESPONSE === 'true';
-
 /**
  * Hash OTP code using SHA-256 and secret salt
  */
@@ -37,7 +33,7 @@ export function hashOtp(otp: string, email: string): string {
 /**
  * Generate a secure 6-digit numeric OTP and store its hash in the database
  */
-export async function createAndStoreOtp(email: string): Promise<{ success: boolean; devOtp?: string; message?: string }> {
+export async function createAndStoreOtp(email: string): Promise<{ success: boolean; message?: string }> {
   const normalizedEmail = email.toLowerCase().trim();
 
   const otpString = crypto.randomInt(100000, 1000000).toString();
@@ -60,6 +56,7 @@ export async function createAndStoreOtp(email: string): Promise<{ success: boole
       created_at: Date.now(),
     });
 
+    // Mock mode is refused in production (see env.ts), so this log only ever reaches a local dev terminal.
     console.log(`\x1b[32m[AEMS OTP DISPATCH]\x1b[0m OTP for ${normalizedEmail}: \x1b[1m${otpString}\x1b[0m (Valid for 10 mins)`);
 
     const mailRes = await sendOtpEmail(normalizedEmail, otpString);
@@ -69,7 +66,6 @@ export async function createAndStoreOtp(email: string): Promise<{ success: boole
 
     return {
       success: true,
-      devOtp: otpString,
       message: mailRes.success
         ? `OTP sent to ${normalizedEmail} via Office 365 SMTP.`
         : `OTP generated. (SMTP Notice: ${mailRes.error})`,
@@ -98,20 +94,15 @@ export async function createAndStoreOtp(email: string): Promise<{ success: boole
 
     const emailResult = await sendOtpEmail(normalizedEmail, otpString);
     if (!emailResult.success) {
-      // Visible only in server logs (pm2 logs) so an administrator can still sign in
-      // while SMTP is being fixed.
-      console.warn(`[AEMS OTP] SMTP dispatch failed for ${normalizedEmail}: ${emailResult.error}. OTP: ${otpString}`);
+      console.error(`[AEMS OTP] SMTP dispatch failed for ${normalizedEmail}: ${emailResult.error}`);
       return {
-        success: true,
-        devOtp: exposeOtpInResponse ? otpString : undefined,
-        message: 'OTP generated, but the email could not be delivered. Please contact your IT Admin.',
+        success: false,
+        message: 'The verification email could not be delivered. Please try again or contact your IT Admin.',
       };
     }
 
-    console.log(`[AEMS OTP] Sent OTP to ${normalizedEmail} via Office 365 SMTP`);
     return {
       success: true,
-      devOtp: exposeOtpInResponse ? otpString : undefined,
       message: `OTP verification code sent to ${normalizedEmail}`,
     };
   } catch (err) {

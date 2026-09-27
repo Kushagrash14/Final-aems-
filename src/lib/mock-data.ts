@@ -61,7 +61,7 @@ export const SEED_PLANTS: Plant[] = [
 export const SEED_USERS: User[] = [
   {
     id: '00000000-0000-0000-0000-000000000001',
-    email: 'itadmin@pgel.in',
+    email: 'software.2040@pgel.in',
     full_name: 'IT Admin (AEMS Root)',
     phone: '+91 98765 43210',
     role: 'it_admin',
