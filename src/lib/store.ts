@@ -22,21 +22,22 @@ import {
   UserRole,
 } from '@/types/database';
 import {
-  SEED_ASSETS,
   SEED_CATEGORIES,
   SEED_CATEGORY_FIELDS,
   SEED_DEPARTMENTS,
-  SEED_EMPLOYEES,
   SEED_LOCATIONS,
   SEED_PLANTS,
-  SEED_PM_MACHINES,
-  SEED_PM_COMPLAINTS,
   SEED_USERS,
   SEED_SCOPES,
 } from '@/lib/mock-data';
 import { env } from '@/lib/env';
 import { db } from '@/lib/db/client';
+import { getLockPool } from '@/lib/db/mysql';
+import { persistDemoState } from '@/lib/demoPersistence';
 import { logAuditEvent } from '@/lib/audit';
+import { createHash } from 'crypto';
+import type { RowDataPacket } from 'mysql2/promise';
+import { inferItCategoryName } from '@/lib/assetType';
 
 // In-Memory state for mock demo mode
 class MemoryStore {
@@ -45,10 +46,11 @@ class MemoryStore {
   departments: Department[] = [...SEED_DEPARTMENTS];
   categories: Category[] = [...SEED_CATEGORIES];
   categoryFields: CategoryFormField[] = [...SEED_CATEGORY_FIELDS];
-  employees: Employee[] = [...SEED_EMPLOYEES];
-  assets: Asset[] = [...SEED_ASSETS];
-  pmMachines: PMMachine[] = [...SEED_PM_MACHINES];
-  pmComplaints: PMComplaint[] = [...SEED_PM_COMPLAINTS];
+  // Demo mode starts empty: only login users and master data (locations, plants, departments, asset types) are seeded.
+  employees: Employee[] = [];
+  assets: Asset[] = [];
+  pmMachines: PMMachine[] = [];
+  pmComplaints: PMComplaint[] = [];
   damageReports: DamageScrapReport[] = [];
   assetAssignments: AssetAssignmentRow[] = [];
   assetTransfers: AssetTransferRow[] = [];
@@ -60,6 +62,24 @@ class MemoryStore {
 }
 
 const memory: MemoryStore = ((globalThis as unknown as { __aems_memory?: MemoryStore }).__aems_memory ??= new MemoryStore());
+
+const PERSISTED_MEMORY_KEYS = [
+  'locations', 'plants', 'departments', 'categories', 'categoryFields', 'employees', 'assets', 'pmMachines',
+  'pmComplaints', 'damageReports', 'assetAssignments', 'assetTransfers', 'users', 'userScopes',
+] as const;
+
+if (env.isMockMode) {
+  persistDemoState(
+    'store',
+    () => Object.fromEntries(PERSISTED_MEMORY_KEYS.map((key) => [key, memory[key]])),
+    (saved) => {
+      const data = (saved || {}) as Record<string, unknown>;
+      for (const key of PERSISTED_MEMORY_KEYS) {
+        if (Array.isArray(data[key])) (memory as unknown as Record<string, unknown>)[key] = data[key];
+      }
+    }
+  );
+}
 
 // -----------------------------------------------------------------------------
 // High-Speed In-Memory Cache (Eliminates repeated 7s Supabase round-trips)
@@ -625,6 +645,93 @@ export async function createCategory(cat: Omit<Category, 'id' | 'created_at' | '
   if (error) throw new Error(error.message);
   invalidateMasterDataCache();
   return data as Category;
+}
+
+export async function resolveCategoryIdByName(categoryName: string | null | undefined): Promise<string | null> {
+  const cleanName = (categoryName || '').trim().toUpperCase();
+  if (!cleanName) return null;
+
+  const all = await getCategories();
+  const matched = all.find(
+    (c) => c.name.trim().toUpperCase() === cleanName || c.code.trim().toUpperCase() === cleanName
+  );
+  if (matched) return matched.id;
+
+  const baseCode = `CAT-${cleanName.replace(/[^A-Z0-9]/g, '').slice(0, 6) || 'GEN'}`;
+  const usedCodes = new Set(all.map((c) => c.code.trim().toUpperCase()));
+  let code = baseCode;
+  for (let n = 2; usedCodes.has(code); n++) code = `${baseCode}${n}`;
+
+  try {
+    const created = await createCategory({
+      name: cleanName,
+      code,
+      description: `${cleanName} asset type`,
+      icon: 'Tag',
+      is_active: true,
+    });
+    return created.id;
+  } catch {
+    // Another request may have created it concurrently (or the cache was stale).
+    invalidateMasterDataCache();
+    const fresh = await getCategories();
+    const again = fresh.find(
+      (c) => c.name.trim().toUpperCase() === cleanName || c.code.trim().toUpperCase() === cleanName
+    );
+    return again?.id ?? null;
+  }
+}
+
+export { inferItCategoryName };
+
+export interface CategoryRepairResult {
+  scanned: number;
+  fixed: { id: string; asset_tag: string; name: string; from: string; to: string }[];
+}
+
+/**
+ * Moves Laptop/Desktop assets that were saved under an unrelated category
+ * (e.g. Camera/NVR, from the old "first category" fallback) or the generic
+ * "IT" bucket into the specific LAPTOP / DESKTOP asset types.
+ */
+export async function repairMisfiledItAssets(dryRun = false): Promise<CategoryRepairResult> {
+  const assets = await getAssets();
+  const result: CategoryRepairResult = { scanned: assets.length, fixed: [] };
+  const targetIds: Partial<Record<'LAPTOP' | 'DESKTOP', string>> = {};
+
+  for (const a of assets) {
+    const currentCat = (a.category?.name || '').trim().toUpperCase();
+    if (currentCat.includes('LAPTOP') || currentCat.includes('DESKTOP')) continue;
+
+    const inferred = inferItCategoryName(a.asset_tag, a.name, a.model);
+    if (!inferred) continue;
+
+    let targetId = targetIds[inferred];
+    if (!targetId && !dryRun) {
+      targetId = (await resolveCategoryIdByName(inferred)) ?? undefined;
+      if (targetId) targetIds[inferred] = targetId;
+    }
+    if (!dryRun) {
+      if (!targetId) continue;
+      if (env.isMockMode) {
+        const row = memory.assets.find((x) => x.id === a.id);
+        if (row) row.category_id = targetId;
+      } else {
+        const { error } = await db.from('assets').update({ category_id: targetId }).eq('id', a.id);
+        if (error) continue;
+      }
+    }
+    result.fixed.push({
+      id: a.id,
+      asset_tag: a.asset_tag,
+      name: a.name,
+      from: a.category?.name || '—',
+      to: inferred,
+    });
+  }
+
+  if (!dryRun && result.fixed.length > 0) invalidateAssetCache();
+  return result;
 }
 
 export async function updateCategory(id: string, updates: Partial<Category>): Promise<Category | null> {
@@ -1612,6 +1719,92 @@ export async function getAssetHistory(assetId: string): Promise<AssetHistoryReco
   return history.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 }
 
+const localLockChains = new Map<string, Promise<void>>();
+
+/**
+ * Serializes work for one key across concurrent requests: an in-process queue plus
+ * a MySQL GET_LOCK so separate server processes are serialized too.
+ */
+async function withNamedLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const previous = localLockChains.get(key) ?? Promise.resolve();
+  let releaseLocal!: () => void;
+  const mine = new Promise<void>((resolve) => { releaseLocal = resolve; });
+  const chain = previous.then(() => mine);
+  localLockChains.set(key, chain);
+  await previous;
+
+  try {
+    if (env.isMockMode) return await fn();
+
+    // MySQL lock names are limited to 64 characters.
+    const lockName = `aems:${createHash('sha1').update(key).digest('hex')}`;
+    const conn = await getLockPool().getConnection();
+    try {
+      const [rows] = await conn.query<RowDataPacket[]>('SELECT GET_LOCK(?, 15) AS ok', [lockName]);
+      if (Number(rows[0]?.ok) !== 1) {
+        throw new Error('System is busy with another entry for the same record. Please try again in a moment.');
+      }
+      try {
+        return await fn();
+      } finally {
+        await conn.query('SELECT RELEASE_LOCK(?)', [lockName]).catch(() => undefined);
+      }
+    } finally {
+      conn.release();
+    }
+  } finally {
+    releaseLocal();
+    if (localLockChains.get(key) === chain) localLockChains.delete(key);
+  }
+}
+
+function normalizeSerial(serial: string | null | undefined): string {
+  return (serial || '').trim().toUpperCase();
+}
+
+/** Returns an existing (non-deleted) asset carrying this serial number, if any. */
+async function findActiveAssetBySerial(
+  serial: string,
+  excludeId?: string
+): Promise<{ id: string; asset_tag: string } | null> {
+  const clean = normalizeSerial(serial);
+  if (!clean) return null;
+  if (env.isMockMode) {
+    const hit = memory.assets.find(
+      (a) => !a.is_deleted && a.id !== excludeId && normalizeSerial(a.serial_number) === clean
+    );
+    return hit ? { id: hit.id, asset_tag: hit.asset_tag } : null;
+  }
+  const { data, error } = await db
+    .from('assets')
+    .select('id, asset_tag, serial_number')
+    .ilike('serial_number', clean)
+    .eq('is_deleted', false);
+  if (error) throw new Error(`Failed to verify serial number: ${error.message}`);
+  const hit = ((data || []) as Array<{ id: string; asset_tag: string; serial_number: string | null }>).find(
+    (a) => a.id !== excludeId && normalizeSerial(a.serial_number) === clean
+  );
+  return hit ? { id: hit.id, asset_tag: hit.asset_tag } : null;
+}
+
+function duplicateSerialError(serial: string, assetTag: string): Error {
+  return new Error(`Serial number ${normalizeSerial(serial)} is already registered on asset ${assetTag}.`);
+}
+
+/** Short random pause so colliding requests don't retry in lock-step. */
+function collisionBackoff(attempt: number): Promise<void> {
+  const ms = Math.min(400, 20 * attempt) + Math.floor(Math.random() * 60);
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const TAG_COLLISION_MAX_ATTEMPTS = 12;
+
+function isDuplicateKeyError(error: { code?: string; message?: string } | null | undefined): boolean {
+  if (!error) return false;
+  const msg = (error.message || '').toLowerCase();
+  return error.code === '23505' || msg.includes('duplicate') || msg.includes('unique');
+}
+
 export async function generateUniqueAssetTag(
   departmentId?: string,
   itAssetType?: string
@@ -1715,6 +1908,26 @@ export async function createAsset(
     }
   }
 
+  const serialKey = normalizeSerial(safeAssetData.serial_number);
+  if (serialKey) {
+    return withNamedLock(`asset-serial:${serialKey}`, async () => {
+      const existing = await findActiveAssetBySerial(serialKey);
+      if (existing) throw duplicateSerialError(serialKey, existing.asset_tag);
+      return insertAssetRecord(assetId, now, safeAssetData, peripherals, customValues, actorId, itAssetType);
+    });
+  }
+  return insertAssetRecord(assetId, now, safeAssetData, peripherals, customValues, actorId, itAssetType);
+}
+
+async function insertAssetRecord(
+  assetId: string,
+  now: string,
+  safeAssetData: Omit<Asset, 'id' | 'created_at' | 'updated_at' | 'is_deleted'>,
+  peripherals: Array<{ peripheral_name: string; model_number?: string; serial_number?: string; is_included: boolean; notes?: string }> | undefined,
+  customValues: Record<string, string> | undefined,
+  actorId: string | undefined,
+  itAssetType: string | undefined
+): Promise<Asset> {
   // ATOMIC TAG ASSIGNMENT & CONCURRENCY COLLISION GUARD:
   let assignedTag = safeAssetData.asset_tag;
   if (!assignedTag || assignedTag.includes('XXXX') || assignedTag.toUpperCase().includes('AUTO') || assignedTag.trim() === '') {
@@ -1752,7 +1965,7 @@ export async function createAsset(
     return newAsset;
   }
 
-  // Supabase PostgreSQL Mode: Concurrency retry loop (up to 5 attempts)
+  // MySQL mode: the UNIQUE key on asset_tag rejects collisions; regenerate and retry.
   const VALID_ASSET_COLUMNS = new Set([
     'id', 'asset_tag', 'serial_number', 'name', 'model', 'manufacturer',
     'category_id', 'purchase_date', 'purchase_cost', 'po_number',
@@ -1765,7 +1978,7 @@ export async function createAsset(
 
   let attempts = 0;
   let lastError: Error | null = null;
-  while (attempts < 5) {
+  while (attempts < TAG_COLLISION_MAX_ATTEMPTS) {
     attempts++;
     const dbAssetPayload: Record<string, any> = {
       id: assetId,
@@ -1835,10 +2048,10 @@ export async function createAsset(
       return data as Asset;
     }
 
-    // If duplicate tag collision occurs, re-fetch latest max sequence and retry immediately
-    if (error && (error.code === '23505' || error.message?.includes('duplicate') || error.message?.includes('unique'))) {
+    if (isDuplicateKeyError(error)) {
+      lastError = new Error(error!.message);
+      await collisionBackoff(attempts);
       assignedTag = await generateUniqueAssetTag(safeAssetData.category_id, itAssetType);
-      lastError = new Error(error.message);
       continue;
     }
 
@@ -1847,10 +2060,34 @@ export async function createAsset(
     }
   }
 
-  throw lastError || new Error('Failed to create asset after concurrency collision retries');
+  throw lastError
+    ? new Error('Too many simultaneous entries right now. Please press Save again.')
+    : new Error('Failed to create asset after concurrency collision retries');
 }
 
 export async function updateAsset(
+  id: string,
+  assetUpdates: Partial<Asset>,
+  peripherals?: AssetPeripheral[],
+  customValues?: Record<string, any>,
+  updatedBy?: string
+): Promise<Asset | null> {
+  const newSerial = normalizeSerial(assetUpdates.serial_number);
+  if (newSerial) {
+    return withNamedLock(`asset-serial:${newSerial}`, async () => {
+      const current = await getAssetById(id);
+      // Only block when the serial is actually being changed, so legacy duplicates stay editable.
+      if (current && normalizeSerial(current.serial_number) !== newSerial) {
+        const duplicate = await findActiveAssetBySerial(newSerial, id);
+        if (duplicate) throw duplicateSerialError(newSerial, duplicate.asset_tag);
+      }
+      return applyAssetUpdate(id, assetUpdates, peripherals, customValues, updatedBy);
+    });
+  }
+  return applyAssetUpdate(id, assetUpdates, peripherals, customValues, updatedBy);
+}
+
+async function applyAssetUpdate(
   id: string,
   assetUpdates: Partial<Asset>,
   peripherals?: AssetPeripheral[],
@@ -2146,6 +2383,9 @@ async function updateAssetRow(assetId: string, payload: Record<string, unknown>)
   return res.data as Asset;
 }
 
+const ASSET_JUST_ASSIGNED_MESSAGE =
+  'This asset was just assigned by another user a moment ago. Please refresh the page to see its current custodian.';
+
 export async function assignAssetToEmployee(params: {
   assetId: string;
   employeeId: string;
@@ -2180,12 +2420,47 @@ export async function assignAssetToEmployee(params: {
 
   const now = new Date().toISOString();
 
-  // Close any custody record left open by older data (e.g. in-house moves)
-  const strayClosed = await closeOpenAssignments({
-    assetId: params.assetId,
-    at: now,
-    remarks: 'Custody closed before new assignment',
-  });
+  // Atomically claim the asset: only succeeds while nobody holds it, so two
+  // people assigning the same asset at the same moment cannot both win.
+  const claim = { assigned_employee_id: params.employeeId, status: 'in_service', updated_at: now };
+  const releaseClaim = async () => {
+    const revert = { assigned_employee_id: null, status: asset.status, updated_at: new Date().toISOString() };
+    if (env.isMockMode) {
+      Object.assign(getStoredMockAsset(params.assetId), revert);
+    } else {
+      await db.from('assets').update(revert).eq('id', params.assetId).eq('assigned_employee_id', params.employeeId);
+    }
+    invalidateAssetCache();
+  };
+
+  if (env.isMockMode) {
+    const stored = getStoredMockAsset(params.assetId);
+    if (stored.assigned_employee_id) throw new Error(ASSET_JUST_ASSIGNED_MESSAGE);
+    Object.assign(stored, claim);
+  } else {
+    const { count, error } = await db
+      .from('assets')
+      .update(claim)
+      .eq('id', params.assetId)
+      .is('assigned_employee_id', null)
+      .eq('is_deleted', false);
+    if (error) throw new Error(error.message);
+    if (!count) throw new Error(ASSET_JUST_ASSIGNED_MESSAGE);
+  }
+  invalidateAssetCache();
+
+  let strayClosed: Awaited<ReturnType<typeof closeOpenAssignments>>;
+  try {
+    // Close any custody record left open by older data (e.g. in-house moves)
+    strayClosed = await closeOpenAssignments({
+      assetId: params.assetId,
+      at: now,
+      remarks: 'Custody closed before new assignment',
+    });
+  } catch (e) {
+    await releaseClaim();
+    throw e;
+  }
 
   let assignmentId: string;
   try {
@@ -2193,19 +2468,16 @@ export async function assignAssetToEmployee(params: {
       assetId: params.assetId,
       employeeId: params.employeeId,
       assignedBy: params.assignedBy,
-        remarks: params.remarks,
+      remarks: params.remarks,
       at: now,
     });
   } catch (e) {
     await reopenAssignments(strayClosed);
+    await releaseClaim();
     throw e;
   }
 
-  const updateData: Record<string, any> = {
-    assigned_employee_id: params.employeeId,
-    status: 'in_service',
-    updated_at: now,
-  };
+  const updateData: Record<string, any> = { ...claim };
   if (params.hostname !== undefined) {
     updateData.hostname = params.hostname;
     const meta = mergeAssetMeta(asset.invoice_document_path, { hostname: params.hostname });
@@ -2223,6 +2495,7 @@ export async function assignAssetToEmployee(params: {
   } catch (e) {
     await removeAssignmentRow(assignmentId);
     await reopenAssignments(strayClosed);
+    await releaseClaim();
     throw e;
   }
 
@@ -3656,6 +3929,7 @@ export interface BatchImportResult {
   assets_assigned: number;
   imported_tags: string[];
   created_employees: Array<{ id: string; emp_code: string; full_name: string }>;
+  skipped_rows: Array<{ serial_number: string; reason: string }>;
 }
 
 export async function batchImportAssets(
@@ -3674,6 +3948,7 @@ export async function batchImportAssets(
     assets_assigned: 0,
     imported_tags: [],
     created_employees: [],
+    skipped_rows: [],
   };
 
   // 1. Preload / cache categories to resolve category_id
@@ -3694,19 +3969,10 @@ export async function batchImportAssets(
     if (matched) {
       return { id: matched.id, typeStr: cleanCat };
     }
-    // Create new category if not found
-    try {
-      const created = await createCategory({
-        name: cleanCat,
-        code: `CAT-${cleanCat.slice(0, 4).replace(/[^A-Z]/g, '') || 'GEN'}`,
-        description: `Auto-generated category for ${cleanCat}`,
-        is_active: true,
-      });
-      existingCategories.push(created);
-      return { id: created.id, typeStr: cleanCat };
-    } catch {
-      return { id: existingCategories[0]?.id || crypto.randomUUID(), typeStr: cleanCat };
-    }
+    const resolvedId = await resolveCategoryIdByName(cleanCat);
+    if (!resolvedId) throw new Error(`Could not create asset type "${cleanCat}"`);
+    existingCategories.push({ id: resolvedId, name: cleanCat, code: cleanCat } as Category);
+    return { id: resolvedId, typeStr: cleanCat };
   };
 
   // 2. Preload existing employees into a local lookup Map to deduplicate
@@ -3741,6 +4007,12 @@ export async function batchImportAssets(
   for (const item of items) {
     const cleanSerial = item.serial_number?.trim().toUpperCase();
     if (!cleanSerial) continue;
+
+    const alreadyRegistered = await findActiveAssetBySerial(cleanSerial);
+    if (alreadyRegistered) {
+      result.skipped_rows.push({ serial_number: cleanSerial, reason: `Already registered as ${alreadyRegistered.asset_tag}` });
+      continue;
+    }
 
     const { id: catId, typeStr: catTypeStr } = await resolveCategoryId(item.category_name);
 
@@ -3821,7 +4093,7 @@ export async function batchImportAssets(
     else if (catTypeStr.includes('DESKTOP')) itAssetType = 'DESKTOP';
 
     // Generate atomic unique tag
-    const assignedTag = await generateUniqueAssetTag(catId, itAssetType);
+    let assignedTag = await generateUniqueAssetTag(catId, itAssetType);
     const assetId = crypto.randomUUID();
 
     const assetStatus = assignedEmployeeId ? ('in_service' as const) : ('in_storage' as const);
@@ -3897,9 +4169,22 @@ export async function batchImportAssets(
         }
       }
 
-      const { error: insertErr } = await db.from('assets').insert(dbPayload);
-      if (insertErr) {
-        console.warn(`Failed to insert batch asset ${assignedTag}:`, insertErr.message);
+      const outcome = await withNamedLock(`asset-serial:${cleanSerial}`, async (): Promise<{ ok: true } | { ok: false; reason: string }> => {
+        const duplicate = await findActiveAssetBySerial(cleanSerial);
+        if (duplicate) return { ok: false, reason: `Already registered as ${duplicate.asset_tag}` };
+        for (let attempt = 1; attempt <= TAG_COLLISION_MAX_ATTEMPTS; attempt++) {
+          const { error: insertErr } = await db.from('assets').insert(dbPayload);
+          if (!insertErr) return { ok: true };
+          if (!isDuplicateKeyError(insertErr)) return { ok: false, reason: insertErr.message };
+          await collisionBackoff(attempt);
+          dbPayload.asset_tag = await generateUniqueAssetTag(catId, itAssetType);
+        }
+        return { ok: false, reason: 'Asset tag collided too many times; please re-import this row' };
+      });
+      assignedTag = dbPayload.asset_tag;
+      if (!outcome.ok) {
+        console.warn(`Failed to insert batch asset ${assignedTag}:`, outcome.reason);
+        result.skipped_rows.push({ serial_number: cleanSerial, reason: outcome.reason });
         continue;
       }
 

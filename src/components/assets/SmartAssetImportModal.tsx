@@ -42,6 +42,7 @@ export interface SmartAssetImportModalProps {
     assets_in_stock: number;
     assets_assigned: number;
     imported_tags: string[];
+    skipped_rows?: Array<{ serial_number: string; reason: string }>;
   }) => void;
 }
 
@@ -263,6 +264,7 @@ export default function SmartAssetImportModal({
     assets_assigned: number;
     imported_tags: string[];
     created_employees: Array<{ id: string; emp_code: string; full_name: string }>;
+    skipped_rows?: Array<{ serial_number: string; reason: string }>;
   } | null>(null);
 
   // Reset state when closed
@@ -842,6 +844,22 @@ export default function SmartAssetImportModal({
                   <p className="text-base font-black text-amber-700 mt-0.5">{importResult.assets_in_stock}</p>
                 </div>
               </div>
+
+              {importResult.skipped_rows && importResult.skipped_rows.length > 0 && (
+                <div className="bg-amber-50/80 border border-amber-200 rounded-xl p-2.5 text-left space-y-1.5">
+                  <p className="text-[11px] font-black text-amber-900 flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                    Rows Not Imported ({importResult.skipped_rows.length})
+                  </p>
+                  <ul className="space-y-0.5 max-h-28 overflow-y-auto">
+                    {importResult.skipped_rows.map((row, idx) => (
+                      <li key={`${row.serial_number}-${idx}`} className="text-[10px] text-amber-900">
+                        <span className="font-mono font-bold">{row.serial_number}</span> — {row.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               {importResult.created_employees && importResult.created_employees.length > 0 && (
                 <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-2.5 text-left space-y-1.5">

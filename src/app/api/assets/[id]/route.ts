@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAssetById, getAssetHistory, softDeleteAsset, updateAsset } from '@/lib/store';
+import { getAssetById, getAssetHistory, softDeleteAsset, updateAsset, resolveCategoryIdByName } from '@/lib/store';
 import { validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { canDeleteAsset, canUserEdit, isEntityInUserScope } from '@/lib/permissions';
 import { logAuditEvent } from '@/lib/audit';
@@ -61,7 +61,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
   try {
     const body = await req.json();
-    const { asset: assetUpdates, peripherals, customValues } = body;
+    const { asset: assetUpdates, peripherals, customValues, categoryName } = body;
+
+    if (categoryName && assetUpdates) {
+      const resolvedCatId = await resolveCategoryIdByName(categoryName);
+      if (resolvedCatId) assetUpdates.category_id = resolvedCatId;
+    }
 
     // Validate scope for updated location/plant/dept/category if changing
     const nextCat = assetUpdates?.category_id || asset.category_id;

@@ -6,9 +6,11 @@ import Link from 'next/link';
 import { Asset, User, Employee, Department } from '@/types/database';
 import { AssetHistoryRecord } from '@/lib/store';
 import AssetQRCode from '@/components/assets/AssetQRCode';
-import { formatCurrency, formatDate } from '@/lib/utils';
+import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils';
+import DuplicateAssetTypeModal, { type DuplicateApprovalPayload, type DuplicateConflictInfo } from '@/components/assets/DuplicateAssetTypeModal';
 import IncidentReportModal from '@/components/assets/IncidentReportModal';
 import { getAssetPreviewImage } from '@/lib/assetVisuals';
+import { displayAssetType } from '@/lib/assetType';
 import {
   ArrowLeft,
   Edit2,
@@ -53,6 +55,7 @@ export default function AssetDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [showQrScanModal, setShowQrScanModal] = useState(false);
+  const [qrSheetUrl, setQrSheetUrl] = useState('');
 
   // Assign & Deassign modal states
   const [showAssignModal, setShowAssignModal] = useState(false);
@@ -75,6 +78,10 @@ export default function AssetDetailPage() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [assignRemarks, setAssignRemarks] = useState('');
   const [assignHostname, setAssignHostname] = useState('');
+  const [assignHodName, setAssignHodName] = useState('');
+  const [assignHodEmpCode, setAssignHodEmpCode] = useState('');
+  const [assignHodEmail, setAssignHodEmail] = useState('');
+  const [duplicateConflict, setDuplicateConflict] = useState<DuplicateConflictInfo | null>(null);
   const [assigning, setAssigning] = useState(false);
 
   const [deassignCondition, setDeassignCondition] = useState('Good Condition (Direct to Available Pool)');
@@ -169,8 +176,8 @@ export default function AssetDetailPage() {
     } catch {}
   };
 
-  const handleAssignSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAssignSubmit = async (e?: React.FormEvent, duplicateApproval?: DuplicateApprovalPayload) => {
+    e?.preventDefault();
     if (!asset) return;
 
     if (assignMode === 'employee' && !selectedEmp) {
@@ -180,6 +187,11 @@ export default function AssetDetailPage() {
 
     if (assignMode === 'in_house' && !assignExactLocation.trim()) {
       alert('Please enter exact placement spot in company');
+      return;
+    }
+
+    if (assignMode === 'in_house' && assignHodEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(assignHodEmail.trim())) {
+      alert('Please enter a valid HOD email address');
       return;
     }
 
@@ -196,11 +208,26 @@ export default function AssetDetailPage() {
           exactLocation: assignMode === 'in_house' ? assignExactLocation.trim() : undefined,
           remarks: assignRemarks.trim() || undefined,
           hostname: assignHostname.trim() ? assignHostname.trim().toUpperCase() : undefined,
+          duplicateApproval: duplicateApproval || undefined,
+          hodNotification:
+            assignMode === 'in_house' && assignHodEmail.trim()
+              ? {
+                  departmentName: departments.find((d) => d.id === assignDeptId)?.name || asset.department?.name,
+                  name: assignHodName.trim().toUpperCase(),
+                  empCode: assignHodEmpCode.trim().toUpperCase(),
+                  email: assignHodEmail.trim().toLowerCase(),
+                }
+              : undefined,
         }),
       });
 
       const data = await res.json();
+      if (res.status === 409 && data.conflict) {
+        setDuplicateConflict(data.conflict as DuplicateConflictInfo);
+        return;
+      }
       if (!res.ok) throw new Error(data.error || 'Assignment failed');
+      setDuplicateConflict(null);
 
       setAsset(data.asset);
       await reloadAssetFromServer();
@@ -210,10 +237,14 @@ export default function AssetDetailPage() {
       setAssignEmpQuery('');
       setAssignRemarks('');
       setAssignExactLocation('');
+      setAssignHodName('');
+      setAssignHodEmpCode('');
+      setAssignHodEmail('');
+      const hodNote = data.hodMail ? (data.hodMail.sent ? ' HOD notified by email.' : ' HOD email could not be sent.') : '';
       setActionToast(
         assignMode === 'employee'
           ? `Asset successfully assigned to ${selectedEmp?.full_name}!`
-          : `Asset successfully deployed for In-House usage!`
+          : `Asset successfully deployed for In-House usage!${hodNote}`
       );
       setTimeout(() => setActionToast(null), 3500);
     } catch (err: unknown) {
@@ -554,6 +585,7 @@ export default function AssetDetailPage() {
                 size={88}
                 showScanModal={showQrScanModal}
                 onModalClose={() => setShowQrScanModal(false)}
+                onSheetUrlChange={setQrSheetUrl}
               />
             </div>
           </div>
@@ -563,9 +595,15 @@ export default function AssetDetailPage() {
         {/* Blue Info Banner (Matching provided image)                         */}
         {/* =================================================================== */}
         <div
-          onClick={() => setShowQrScanModal(true)}
+          onClick={() => {
+            if (qrSheetUrl) {
+              window.open(qrSheetUrl, '_blank', 'noopener,noreferrer');
+            } else {
+              setShowQrScanModal(true);
+            }
+          }}
           className="bg-blue-50/90 hover:bg-blue-100/80 border border-blue-200/90 rounded-xl px-4 py-3 flex items-center justify-between text-xs font-semibold text-blue-900 shadow-2xs transition-all cursor-pointer"
-          title="Click to view printable QR code tag"
+          title="Open the scan page (PDF)"
         >
           <div className="flex items-center gap-2">
             <Info className="w-4 h-4 text-blue-600 shrink-0" />
@@ -677,6 +715,15 @@ export default function AssetDetailPage() {
                     <span>•</span>
                     <span>Plant: {asset.plant?.name || 'Main Plant'}</span>
                   </div>
+                  {(() => {
+                    const active = history.find((h) => h.type === 'assignment' && !h.return_date);
+                    return active?.date ? (
+                      <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        <span>Assigned on: <strong className="text-slate-700">{formatDateTime(active.date)}</strong></span>
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
               </div>
             </div>
@@ -751,7 +798,7 @@ export default function AssetDetailPage() {
                 ASSET TYPE
               </span>
               <span className="font-black text-blue-600 text-sm uppercase">
-                {asset.category?.name || 'Equipment'}
+                {displayAssetType(asset)}
               </span>
             </div>
 
@@ -798,6 +845,15 @@ export default function AssetDetailPage() {
               </span>
               <span className="font-black text-emerald-600 text-sm uppercase">
                 {statusDisplay}
+              </span>
+            </div>
+
+            <div>
+              <span className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">
+                REGISTERED ON
+              </span>
+              <span className="font-black text-slate-900 text-sm">
+                {formatDateTime(asset.created_at)}
               </span>
             </div>
           </div>
@@ -1030,7 +1086,7 @@ export default function AssetDetailPage() {
                       </div>
                       <div className="flex items-center gap-1 text-[11px] font-semibold text-slate-400">
                         <Clock className="w-3 h-3" />
-                        <span>{formatDate(h.date)}</span>
+                        <span>{formatDateTime(h.date)}</span>
                       </div>
                     </div>
 
@@ -1048,7 +1104,7 @@ export default function AssetDetailPage() {
                         )}
                         {h.return_date && (
                           <span className="text-[11px] text-slate-500">
-                            (Returned on: {formatDate(h.return_date)})
+                            (Returned on: {formatDateTime(h.return_date)})
                           </span>
                         )}
                       </div>
@@ -1247,6 +1303,36 @@ export default function AssetDetailPage() {
                       Specify exact location where this camera/printer/server/switch is installed.
                     </p>
                   </div>
+
+                  <div className="p-3 rounded-xl border border-emerald-200 bg-emerald-50/60 space-y-2">
+                    <div className="text-[11px] font-black text-emerald-900 uppercase tracking-wider">
+                      Department HOD (email notification)
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <input
+                        type="text"
+                        value={assignHodName}
+                        onChange={(e) => setAssignHodName(e.target.value.toUpperCase())}
+                        placeholder="HOD Name"
+                        className="w-full px-3 py-2 bg-white border border-emerald-200 rounded-xl text-xs font-semibold uppercase focus:outline-none focus:border-emerald-500"
+                      />
+                      <input
+                        type="text"
+                        value={assignHodEmpCode}
+                        onChange={(e) => setAssignHodEmpCode(e.target.value.toUpperCase())}
+                        placeholder="HOD Employee ID"
+                        className="w-full px-3 py-2 bg-white border border-emerald-200 rounded-xl text-xs font-mono font-semibold uppercase focus:outline-none focus:border-emerald-500"
+                      />
+                      <input
+                        type="email"
+                        value={assignHodEmail}
+                        onChange={(e) => setAssignHodEmail(e.target.value)}
+                        placeholder="hod@pgel.in"
+                        className="w-full px-3 py-2 bg-white border border-emerald-200 rounded-xl text-xs font-semibold lowercase focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                    <p className="text-[10px] text-emerald-700">If an email is entered, the HOD is notified with this asset&apos;s details.</p>
+                  </div>
                 </div>
               )}
 
@@ -1407,6 +1493,23 @@ export default function AssetDetailPage() {
       )}
 
       {/* Floating Action Toast */}
+      {duplicateConflict && (
+        <DuplicateAssetTypeModal
+          conflict={duplicateConflict}
+          employeeLabel={selectedEmp ? `${selectedEmp.full_name} (${selectedEmp.emp_code})` : undefined}
+          assetContext={{ assetId: asset?.id }}
+          onClose={() => setDuplicateConflict(null)}
+          onDeassigned={() => {
+            setDuplicateConflict(null);
+            handleAssignSubmit();
+          }}
+          onApproved={(approval) => {
+            setDuplicateConflict(null);
+            handleAssignSubmit(undefined, approval);
+          }}
+        />
+      )}
+
       {actionToast && (
         <div className="fixed top-5 right-5 z-50 flex items-center gap-2 rounded-2xl bg-emerald-600 text-white px-5 py-3 text-xs font-bold shadow-xl animate-in fade-in slide-in-from-top-4 duration-200">
           <CheckCircle2 className="w-4 h-4 shrink-0" />

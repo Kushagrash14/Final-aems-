@@ -5,9 +5,24 @@
 import { AuditEventCategory, AuditLog, AuditRiskLevel, User } from '@/types/database';
 import { db } from '@/lib/db/client';
 import { env } from '@/lib/env';
-import { SEED_AUDIT_LOGS, SEED_USERS } from '@/lib/mock-data';
+import { SEED_USERS } from '@/lib/mock-data';
+import { auditActorLabel, describeAuditLog } from '@/lib/auditDescribe';
+import { persistDemoState } from '@/lib/demoPersistence';
 
-let inMemoryAuditLogs: AuditLog[] = [...SEED_AUDIT_LOGS];
+const auditGlobal = globalThis as unknown as { __aems_audit_logs?: AuditLog[] };
+const inMemoryAuditLogs: AuditLog[] = (auditGlobal.__aems_audit_logs ??= []);
+
+if (env.isMockMode) {
+  persistDemoState(
+    'auditLogs',
+    () => inMemoryAuditLogs,
+    (saved) => {
+      if (!Array.isArray(saved)) return;
+      inMemoryAuditLogs.length = 0;
+      for (const log of saved as AuditLog[]) inMemoryAuditLogs.push(log);
+    }
+  );
+}
 
 export interface RecordAuditParams {
   event_category: AuditEventCategory;
@@ -135,19 +150,30 @@ export async function getAuditLogs(filter?: {
   plantId?: string;
   departmentId?: string;
   search?: string;
+  userId?: string;
+  from?: string;
+  to?: string;
   limit?: number;
 }): Promise<AuditLog[]> {
-  const limit = filter?.limit || 150;
+  const limit = Math.min(filter?.limit || 1000, 5000);
 
   if (env.isMockMode) {
+    const memoryUsers =
+      (globalThis as unknown as { __aems_memory?: { users?: User[] } }).__aems_memory?.users || [];
     let result = [...inMemoryAuditLogs].map((log) => {
-      const userObj = log.user_id ? SEED_USERS.find((u) => u.id === log.user_id) : undefined;
+      const userObj = log.user_id
+        ? memoryUsers.find((u) => u.id === log.user_id) || SEED_USERS.find((u) => u.id === log.user_id)
+        : undefined;
       return {
         ...log,
         emp_code: log.emp_code || userObj?.emp_code || null,
         user: userObj || log.user,
       };
     });
+
+    if (filter?.userId) result = result.filter((l) => l.user_id === filter.userId);
+    if (filter?.from) result = result.filter((l) => l.created_at >= filter.from!);
+    if (filter?.to) result = result.filter((l) => l.created_at <= filter.to!);
 
     if (filter?.event_category) {
       result = result.filter((l) => l.event_category === filter.event_category);
@@ -194,6 +220,9 @@ export async function getAuditLogs(filter?: {
   if (filter?.locationId) query = query.eq('location_id', filter.locationId);
   if (filter?.plantId) query = query.eq('plant_id', filter.plantId);
   if (filter?.departmentId) query = query.eq('department_id', filter.departmentId);
+  if (filter?.userId) query = query.eq('user_id', filter.userId);
+  if (filter?.from) query = query.gte('created_at', filter.from);
+  if (filter?.to) query = query.lte('created_at', filter.to);
 
   const { data, error } = await query;
   if (error || !data) return [];
@@ -215,12 +244,28 @@ export async function getAuditLogs(filter?: {
   return fetchedLogs;
 }
 
+/** `${target_table}:${record_id}` for every audited record (no row limit). */
+export async function getAuditedRecordKeys(): Promise<Set<string>> {
+  if (env.isMockMode) {
+    return new Set(inMemoryAuditLogs.filter((l) => l.record_id).map((l) => `${l.target_table}:${l.record_id}`));
+  }
+  const { data } = await db.from('audit_logs').select('target_table, record_id').not('record_id', 'is', null);
+  return new Set(
+    ((data as { target_table: string | null; record_id: string | null }[]) || []).map(
+      (r) => `${r.target_table}:${r.record_id}`
+    )
+  );
+}
+
 /**
  * Generate standard RFC 4180 CSV export string from audit logs
  */
 export function generateAuditCsv(logs: AuditLog[]): string {
   const headers = [
     'Timestamp',
+    'Date & Time (IST)',
+    'Description',
+    'User ID',
     'User Name',
     'Email',
     'Employee ID',
@@ -245,7 +290,10 @@ export function generateAuditCsv(logs: AuditLog[]): string {
 
   const rows = logs.map((log) => [
     escapeCsv(log.created_at),
-    escapeCsv(log.user?.full_name || 'System / Direct'),
+    escapeCsv(new Date(log.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })),
+    escapeCsv(describeAuditLog(log)),
+    escapeCsv(log.user_id || ''),
+    escapeCsv(auditActorLabel(log)),
     escapeCsv(log.user?.email || ''),
     escapeCsv(log.emp_code || log.user?.emp_code || ''),
     escapeCsv(log.event_category),

@@ -153,7 +153,7 @@ export default function AssetPlantChart({ assets, plants }: AssetPlantChartProps
       ) : (
         <div className="flex-1 flex flex-col pt-3" style={{ minHeight: CHART_HEIGHT }} key={plantId}>
           <div className="flex-1 flex gap-2 min-h-0">
-            <div className="relative w-7 shrink-0 text-[10px] font-bold text-slate-600 tabular-nums">
+            <div className="relative w-9 shrink-0 text-[10px] font-bold text-slate-600 tabular-nums">
               {ticks.map((t) => (
                 <span
                   key={t}
@@ -216,10 +216,10 @@ export default function AssetPlantChart({ assets, plants }: AssetPlantChartProps
           </div>
 
           <div className="flex gap-2 mt-1.5">
-            <div className="w-7 shrink-0" />
+            <div className="w-9 shrink-0" />
             <div className="flex-1 flex justify-around gap-3">
               {groups.map((g) => (
-                <span key={g.id} className="flex-1 min-w-0 text-center text-xs font-bold text-slate-800 truncate">
+                <span key={g.id} className="flex-1 min-w-0 text-center text-[11px] font-bold text-slate-800 leading-tight break-words line-clamp-2" title={g.label}>
                   {g.label}
                 </span>
               ))}

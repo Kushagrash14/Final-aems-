@@ -37,10 +37,14 @@ import {
   X,
   ChevronRight,
   ChevronDown,
+  Mail,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import SmartMailModule from '@/components/settings/SmartMailModule';
+import CategoryRepairCard from '@/components/settings/CategoryRepairCard';
+import { auditActorLabel, describeAuditLog, isHistoricalLog } from '@/lib/auditDescribe';
 
-type SettingsTab = 'users' | 'location_plant' | 'entry_form' | 'bulk_import' | 'security_audit';
+type SettingsTab = 'users' | 'location_plant' | 'entry_form' | 'bulk_import' | 'security_audit' | 'smart_mail';
 
 function SettingsContent() {
   const searchParams = useSearchParams();
@@ -72,7 +76,8 @@ function SettingsContent() {
       t === 'location_plant' ||
       t === 'entry_form' ||
       t === 'bulk_import' ||
-      t === 'security_audit'
+      t === 'security_audit' ||
+      t === 'smart_mail'
     ) {
       setActiveTab(t);
     }
@@ -1015,6 +1020,10 @@ function SettingsContent() {
   const [auditPlantId, setAuditPlantId] = useState<string>('');
   const [auditDeptId, setAuditDeptId] = useState<string>('');
   const [auditSearch, setAuditSearch] = useState<string>('');
+  const [auditUserId, setAuditUserId] = useState<string>('');
+  const [auditFrom, setAuditFrom] = useState<string>('');
+  const [auditTo, setAuditTo] = useState<string>('');
+  const [auditIncludeHistory, setAuditIncludeHistory] = useState(true);
   const [loadingAudit, setLoadingAudit] = useState(false);
   const [selectedAuditLog, setSelectedAuditLog] = useState<AuditLog | null>(null);
 
@@ -1023,17 +1032,25 @@ function SettingsContent() {
     return plants.filter((p) => p.location_id === auditLocationId);
   }, [plants, auditLocationId]);
 
+  const buildAuditParams = () => {
+    const params = new URLSearchParams();
+    if (auditCategory) params.set('category', auditCategory);
+    if (auditRisk) params.set('risk', auditRisk);
+    if (auditLocationId) params.set('locationId', auditLocationId);
+    if (auditPlantId) params.set('plantId', auditPlantId);
+    if (auditDeptId) params.set('departmentId', auditDeptId);
+    if (auditSearch) params.set('search', auditSearch);
+    if (auditUserId) params.set('userId', auditUserId);
+    if (auditFrom) params.set('from', auditFrom);
+    if (auditTo) params.set('to', auditTo);
+    if (!auditIncludeHistory) params.set('history', '0');
+    return params;
+  };
+
   const fetchAuditLogs = async () => {
     setLoadingAudit(true);
     try {
-      const params = new URLSearchParams();
-      if (auditCategory) params.set('category', auditCategory);
-      if (auditRisk) params.set('risk', auditRisk);
-      if (auditLocationId) params.set('locationId', auditLocationId);
-      if (auditPlantId) params.set('plantId', auditPlantId);
-      if (auditDeptId) params.set('departmentId', auditDeptId);
-      if (auditSearch) params.set('search', auditSearch);
-
+      const params = buildAuditParams();
       const res = await fetch(`/api/audit?${params.toString()}`);
       const data = await res.json();
       if (data?.logs) {
@@ -1050,16 +1067,10 @@ function SettingsContent() {
     if (activeTab === 'security_audit') {
       fetchAuditLogs();
     }
-  }, [activeTab, auditCategory, auditRisk, auditLocationId, auditPlantId, auditDeptId]);
+  }, [activeTab, auditCategory, auditRisk, auditLocationId, auditPlantId, auditDeptId, auditUserId, auditFrom, auditTo, auditIncludeHistory]);
 
   const handleExportCsv = () => {
-    const params = new URLSearchParams();
-    if (auditCategory) params.set('category', auditCategory);
-    if (auditRisk) params.set('risk', auditRisk);
-    if (auditLocationId) params.set('locationId', auditLocationId);
-    if (auditPlantId) params.set('plantId', auditPlantId);
-    if (auditDeptId) params.set('departmentId', auditDeptId);
-    if (auditSearch) params.set('search', auditSearch);
+    const params = buildAuditParams();
     params.set('export', 'csv');
     window.open(`/api/audit?${params.toString()}`, '_blank');
   };
@@ -1197,6 +1208,18 @@ function SettingsContent() {
                 <FileText className="w-3.5 h-3.5" />
                 <span>Security Audit</span>
               </button>
+
+              <button
+                onClick={() => switchTab('smart_mail')}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer whitespace-nowrap ${
+                  activeTab === 'smart_mail'
+                    ? 'bg-blue-600 text-white shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white'
+                }`}
+              >
+                <Mail className="w-3.5 h-3.5" />
+                <span>Smart Mail</span>
+              </button>
             </>
           )}
         </div>
@@ -1216,6 +1239,8 @@ function SettingsContent() {
           <span className="font-semibold">{error}</span>
         </div>
       )}
+
+      {activeTab === 'smart_mail' && isStrictItAdmin && <SmartMailModule locations={locations} plants={plants} />}
 
       {/* ========================================================================= */}
       {/* TAB 1: USER MANAGEMENT                                                    */}
@@ -1686,6 +1711,7 @@ function SettingsContent() {
       {/* ========================================================================= */}
       {activeTab === 'entry_form' && (
         <div className="space-y-5">
+          {isStrictItAdmin && <CategoryRepairCard />}
           {!isStrictItAdmin && (
             <div className="rounded-2xl bg-amber-50 border border-amber-200 p-4 flex items-start gap-3">
               <Lock className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
@@ -2012,6 +2038,61 @@ function SettingsContent() {
                 ))}
               </select>
 
+              {/* User Filter */}
+              <select
+                value={auditUserId}
+                onChange={(e) => setAuditUserId(e.target.value)}
+                className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-xs text-slate-800 font-medium focus:outline-none focus:border-blue-500 cursor-pointer max-w-48"
+              >
+                <option value="">All Users</option>
+                {users.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.full_name} ({u.email})
+                  </option>
+                ))}
+              </select>
+
+              {/* Operation Type Filter */}
+              <select
+                value={auditCategory}
+                onChange={(e) => setAuditCategory(e.target.value)}
+                className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-xs text-slate-800 font-medium focus:outline-none focus:border-blue-500 cursor-pointer"
+              >
+                <option value="">All Operations</option>
+                <option value="session">Login / Logout</option>
+                <option value="data_change">Data Changes</option>
+              </select>
+
+              {/* Date Range */}
+              <label className="flex items-center gap-1 text-[11px] font-semibold text-slate-500">
+                From
+                <input
+                  type="date"
+                  value={auditFrom}
+                  onChange={(e) => setAuditFrom(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-0.5 text-xs text-slate-800 focus:outline-none focus:border-blue-500"
+                />
+              </label>
+              <label className="flex items-center gap-1 text-[11px] font-semibold text-slate-500">
+                To
+                <input
+                  type="date"
+                  value={auditTo}
+                  onChange={(e) => setAuditTo(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-0.5 text-xs text-slate-800 focus:outline-none focus:border-blue-500"
+                />
+              </label>
+
+              <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={auditIncludeHistory}
+                  onChange={(e) => setAuditIncludeHistory(e.target.checked)}
+                  className="accent-blue-600"
+                />
+                Include old entries
+              </label>
+
               {/* Search */}
               <div className="relative">
                 <input
@@ -2019,7 +2100,7 @@ function SettingsContent() {
                   value={auditSearch}
                   onChange={(e) => setAuditSearch(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && fetchAuditLogs()}
-                  placeholder="Emp ID, Action, IP..."
+                  placeholder="Asset tag, Emp ID, Action, IP..."
                   className="w-44 pl-2.5 pr-7 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white font-medium"
                 />
                 <button
@@ -2049,7 +2130,7 @@ function SettingsContent() {
                 Full Immutable Activity Trail ({auditLogs.length} Events Logged)
               </span>
               <span className="text-[11px] text-slate-400">
-                Tracks logins, session duration, IP addresses, asset changes, scopes &amp; removals
+                Every login, entry, edit, assignment &amp; deletion — with user, date &amp; time. &quot;Old entry&quot; = created before audit logging.
               </span>
             </div>
 
@@ -2093,13 +2174,21 @@ function SettingsContent() {
                           </td>
                           <td className="px-4 py-3">
                             <div className="font-bold text-slate-900">
-                              {log.user?.full_name || 'System Actor'}
+                              {auditActorLabel(log)}
                             </div>
                             <div className="text-[10px] text-slate-400 font-mono">
-                              {log.emp_code || log.user?.emp_code || log.user?.email || 'N/A'}
+                              {[log.user?.email, log.emp_code || log.user?.emp_code].filter(Boolean).join(' · ') || 'N/A'}
                             </div>
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 max-w-md">
+                            <div className="text-[12px] font-semibold text-slate-800 mb-1 break-words">
+                              {describeAuditLog(log)}
+                              {isHistoricalLog(log) && (
+                                <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-700 text-[9px] font-bold uppercase align-middle">
+                                  Old entry
+                                </span>
+                              )}
+                            </div>
                             <span
                               className={`px-2 py-0.5 rounded-md font-mono text-[10px] font-extrabold uppercase border ${
                                 isLogin

@@ -30,8 +30,31 @@ const EXTRA_RELATIONS: ForeignKeyMeta[] = [
 
 const globalRef = globalThis as unknown as {
   __aems_mysql_pool?: Pool;
+  __aems_mysql_lock_pool?: Pool;
   __aems_mysql_schema?: Promise<SchemaMeta>;
 };
+
+/**
+ * Separate small pool that only holds GET_LOCK sessions. Lock holders run their
+ * queries on the main pool, so locks can never starve the main pool of connections.
+ */
+export function getLockPool(): Pool {
+  if (!globalRef.__aems_mysql_lock_pool) {
+    globalRef.__aems_mysql_lock_pool = mysql.createPool({
+      host: env.db.host,
+      port: env.db.port,
+      user: env.db.user,
+      password: env.db.password,
+      database: env.db.database,
+      ssl: env.db.ssl ? 'Amazon RDS' : undefined,
+      waitForConnections: true,
+      connectionLimit: 4,
+      queueLimit: 0,
+      enableKeepAlive: true,
+    });
+  }
+  return globalRef.__aems_mysql_lock_pool;
+}
 
 export function getPool(): Pool {
   if (!globalRef.__aems_mysql_pool) {

@@ -59,7 +59,7 @@ export default function AssetCategoryChart({ assets, categories }: AssetCategory
           {shown.map((r, i) => (
             <div key={r.id}>
               <div className="flex items-baseline justify-between gap-2 mb-1.5">
-                <span className="text-xs font-semibold text-slate-800 truncate">{r.name}</span>
+                <span className="text-xs font-semibold text-slate-800 min-w-0 break-words">{r.name}</span>
                 <span className="text-xs text-slate-500 shrink-0">
                   <strong className="text-sm text-slate-900">{r.count}</strong>
                   <span className="mx-1.5 text-slate-300">|</span>

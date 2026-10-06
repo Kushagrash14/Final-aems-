@@ -26,8 +26,8 @@ export default function MetricStrip({ items }: { items: MetricItem[] }) {
     >
       {items.map((m, i) => (
         <div key={m.label} className="px-2.5 py-1.5 min-w-0">
-          <div className="text-[9px] font-medium uppercase tracking-wide text-slate-400 truncate">{m.label}</div>
-          <div className={`text-base font-semibold leading-tight tabular-nums truncate ${m.className}`}>
+          <div className="text-[9px] font-medium uppercase tracking-wide text-slate-400 leading-tight break-words">{m.label}</div>
+          <div className={`text-base font-semibold leading-tight tabular-nums whitespace-nowrap ${m.className}`}>
             {m.display ?? <CountUp value={m.value} delay={i * 80} suffix={m.suffix} />}
           </div>
         </div>

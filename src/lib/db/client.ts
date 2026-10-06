@@ -275,6 +275,7 @@ export class QueryBuilder<TData = any[]> implements PromiseLike<DbResult<TData>>
   private ignoreDuplicates = false;
   private requiredColumns: string[] = [];
   private buildError: DbQueryError | null = null;
+  private affectedRows: number | null = null;
 
   constructor(private readonly table: string) {}
 
@@ -402,6 +403,8 @@ export class QueryBuilder<TData = any[]> implements PromiseLike<DbResult<TData>>
           break;
         case 'update':
           rows = await this.runUpdate(schema, meta);
+          // Without .select(), count is the number of rows the single atomic UPDATE changed.
+          if (!this.returning) count = this.affectedRows;
           break;
         case 'delete':
           rows = await this.runDelete(schema, meta);
@@ -603,7 +606,8 @@ export class QueryBuilder<TData = any[]> implements PromiseLike<DbResult<TData>>
       const where = this.whereClause(meta);
       const setSql = columns.map((c) => `${q(c)} = ?`).join(', ');
       const setParams = columns.map((c) => convertValue(meta.get(c), values[c]));
-      await pool.query<ResultSetHeader>(`UPDATE ${q(this.table)} SET ${setSql}${where.sql}`, [...setParams, ...where.params]);
+      const [header] = await pool.query<ResultSetHeader>(`UPDATE ${q(this.table)} SET ${setSql}${where.sql}`, [...setParams, ...where.params]);
+      this.affectedRows = header.affectedRows;
       return null;
     }
 

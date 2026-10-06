@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
       subject: '[AEMS v2] SMTP Authentication Test',
       html: `
         <div style="font-family: sans-serif; padding: 20px; color: #1e293b;">
-          <h2 style="color: #2563eb;">PG Electroplast — AEMS v2 SMTP Active</h2>
+          <h2 style="color: #2563eb;">PG Groups — AEMS v2 SMTP Active</h2>
           <p>Your Office 365 SMTP authentication is working properly.</p>
           <ul>
             <li><strong>Host:</strong> ${env.smtpHost || 'smtp.office365.com'}</li>

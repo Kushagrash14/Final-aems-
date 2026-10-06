@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCategories, createCategory, updateCategory, deleteCategory } from '@/lib/store';
 import { validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { canUserEdit } from '@/lib/permissions';
+import { logAuditEvent } from '@/lib/audit';
+
+function requestMeta(req: NextRequest) {
+  return {
+    ip_address: req.headers.get('x-forwarded-for') || '127.0.0.1',
+    user_agent: req.headers.get('user-agent') || 'Unknown',
+  };
+}
 
 export async function GET(req: NextRequest) {
   const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
@@ -48,6 +56,17 @@ export async function POST(req: NextRequest) {
       is_active: true,
     });
 
+    await logAuditEvent({
+      event_category: 'data_change',
+      user_id: validation.user.id,
+      user_role: validation.user.role,
+      action: 'CATEGORY_CREATED',
+      target_table: 'categories',
+      record_id: cat.id,
+      changes: { name: cat.name, code: cat.code },
+      ...requestMeta(req),
+    });
+
     return NextResponse.json({ success: true, category: cat });
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : 'Failed to create category';
@@ -84,6 +103,16 @@ export async function PATCH(req: NextRequest) {
     if (is_active !== undefined) updates.is_active = Boolean(is_active);
 
     const updated = await updateCategory(id, updates);
+    await logAuditEvent({
+      event_category: 'data_change',
+      user_id: validation.user.id,
+      user_role: validation.user.role,
+      action: 'CATEGORY_UPDATED',
+      target_table: 'categories',
+      record_id: id,
+      changes: updates,
+      ...requestMeta(req),
+    });
     return NextResponse.json({ success: true, category: updated });
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : 'Failed to update category';
@@ -114,7 +143,18 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Category ID is required' }, { status: 400 });
     }
 
+    const existing = (await getCategories()).find((c) => c.id === id);
     await deleteCategory(id);
+    await logAuditEvent({
+      event_category: 'data_change',
+      user_id: validation.user.id,
+      user_role: validation.user.role,
+      action: 'CATEGORY_DELETED',
+      target_table: 'categories',
+      record_id: id,
+      changes: existing ? { name: existing.name, code: existing.code } : null,
+      ...requestMeta(req),
+    });
     return NextResponse.json({ success: true });
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : 'Failed to delete category';

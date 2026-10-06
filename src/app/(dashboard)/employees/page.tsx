@@ -759,7 +759,7 @@ function EmployeesPageContent() {
                     <CheckCircle2 className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
                     <div>
                       <div className="font-bold text-slate-900">Assigned {ast.name} ({ast.asset_tag})</div>
-                      <div className="text-[10px] text-slate-500">Recorded on {new Date(ast.created_at).toLocaleDateString()}</div>
+                      <div className="text-[10px] text-slate-500">Recorded on {new Date(ast.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
                     </div>
                   </div>
                 ))}

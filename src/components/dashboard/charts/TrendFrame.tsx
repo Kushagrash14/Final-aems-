@@ -111,7 +111,7 @@ export default function TrendFrame({
   return (
     <div className="flex-1 flex flex-col pt-4" style={{ minHeight }}>
       <div className="flex-1 flex gap-2 min-h-0">
-        <div className="relative w-8 shrink-0 text-[10px] font-bold text-slate-600 tabular-nums">
+        <div className="relative w-10 shrink-0 text-[10px] font-bold text-slate-600 tabular-nums">
           {ticks.map((t) => (
             <span key={t} className="absolute right-0 -translate-y-1/2 leading-none" style={{ top: `${y(t)}%` }}>
               {t}
@@ -232,10 +232,10 @@ export default function TrendFrame({
       </div>
 
       <div className="flex gap-2 mt-1.5">
-        <div className="w-8 shrink-0" />
+        <div className="w-10 shrink-0" />
         <div className="flex-1 flex">
           {labels.map((l) => (
-            <span key={l} className="flex-1 min-w-0 text-center text-[10px] font-bold text-slate-700 truncate">
+            <span key={l} className="flex-1 min-w-0 text-center text-[10px] font-bold text-slate-700 leading-tight break-words line-clamp-2">
               {l}
             </span>
           ))}

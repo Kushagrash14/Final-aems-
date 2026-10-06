@@ -10,6 +10,7 @@ interface AssetQRCodeProps {
   size?: number;
   showScanModal?: boolean;
   onModalClose?: () => void;
+  onSheetUrlChange?: (url: string) => void;
 }
 
 export default function AssetQRCode({
@@ -17,23 +18,23 @@ export default function AssetQRCode({
   size = 96,
   showScanModal = false,
   onModalClose,
+  onSheetUrlChange,
 }: AssetQRCodeProps) {
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
+  const [sheetUrl, setSheetUrl] = useState<string>('');
   const [showModal, setShowModal] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     async function generate() {
       try {
-        // Unique payload per asset: contains asset code, serial, name, category, and direct verification URL
-        const origin = typeof window !== 'undefined' ? window.location.origin : 'https://aems.pgel.in';
-        const payload = JSON.stringify({
-          tag: asset.asset_tag,
-          serial: asset.serial_number || 'N/A',
-          name: asset.name,
-          dept: asset.category?.name || 'IT',
-          company: 'PG Electroplast Ltd',
-          verify_url: `${origin}/assets/${asset.id}`,
-        });
+        // Scanning opens a formatted PDF info sheet (signed link, no login needed).
+        const res = await fetch(`/api/assets/${encodeURIComponent(asset.id)}/qr-token`);
+        const data = res.ok ? await res.json() : null;
+        const payload: string = data?.url || `${window.location.origin}/assets/${asset.id}`;
+        if (cancelled) return;
+        setSheetUrl(data?.url || '');
+        onSheetUrlChange?.(data?.url || '');
 
         const url = await QRCode.toDataURL(payload, {
           width: 256,
@@ -44,7 +45,7 @@ export default function AssetQRCode({
           },
           errorCorrectionLevel: 'M',
         });
-        setQrDataUrl(url);
+        if (!cancelled) setQrDataUrl(url);
       } catch (err) {
         console.error('Failed to generate QR:', err);
       }
@@ -53,7 +54,19 @@ export default function AssetQRCode({
     if (asset?.asset_tag) {
       generate();
     }
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asset]);
+
+  const openScan = () => {
+    if (sheetUrl) {
+      window.open(sheetUrl, '_blank', 'noopener,noreferrer');
+    } else {
+      setShowModal(true);
+    }
+  };
 
   const handlePrint = () => {
     const printWindow = window.open('', '_blank');
@@ -96,9 +109,9 @@ export default function AssetQRCode({
     <>
       <div className="flex flex-col items-center justify-center p-2 rounded-xl bg-white border border-slate-200 shadow-xs group">
         <div
-          onClick={() => setShowModal(true)}
+          onClick={openScan}
           className="cursor-pointer transition-transform group-hover:scale-105"
-          title="Click to view & print unique asset QR"
+          title="Click to open the scan page (PDF)"
         >
           {qrDataUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -120,11 +133,20 @@ export default function AssetQRCode({
 
         <button
           type="button"
-          onClick={() => setShowModal(true)}
+          onClick={openScan}
           className="mt-1 flex items-center gap-1 text-[10px] font-black text-blue-600 hover:text-blue-800 tracking-wider uppercase cursor-pointer"
         >
           <span>OPEN SCAN</span>
           <ExternalLink className="w-2.5 h-2.5" />
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowModal(true)}
+          className="mt-0.5 flex items-center gap-1 text-[9px] font-bold text-slate-500 hover:text-slate-800 tracking-wider uppercase cursor-pointer"
+          title="View, print or download the QR tag"
+        >
+          <Printer className="w-2.5 h-2.5" />
+          <span>Print Tag</span>
         </button>
       </div>
 
@@ -181,7 +203,15 @@ export default function AssetQRCode({
             </div>
 
             <div className="text-[11px] text-slate-500 text-center leading-snug">
-              Every asset code is assigned a mathematically distinct QR code containing full identity details.
+              Scanning this QR opens the asset information sheet as a PDF.
+              {sheetUrl && (
+                <>
+                  {' '}
+                  <a href={sheetUrl} target="_blank" rel="noreferrer" className="font-bold text-blue-600 hover:underline">
+                    Preview PDF
+                  </a>
+                </>
+              )}
             </div>
 
             <div className="flex items-center gap-2 pt-1">
