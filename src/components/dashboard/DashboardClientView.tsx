@@ -338,19 +338,19 @@ export default function DashboardClientView({
         )}
 
         <DrillDownContext.Provider value={drillDownApi}>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4.5 relative z-10 items-stretch">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 md:[&>*:last-child]:col-span-2 xl:[&>*:last-child]:col-span-1 gap-4.5 relative z-10 items-stretch">
           <AssetPlantChart assets={filteredAssets} plants={plants} />
           <AssetStatusCard assets={filteredAssets} />
           <AssetDepartmentChart assets={filteredAssets} departments={departments} />
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4.5 relative z-10 items-stretch">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 md:[&>*:last-child]:col-span-2 xl:[&>*:last-child]:col-span-1 gap-4.5 relative z-10 items-stretch">
           <AssetAgeDistributionChart assets={filteredAssets} />
           <WarrantyCard assets={filteredAssets} />
           <AssetTrendChart assets={filteredAssets} />
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4.5 relative z-10 items-stretch">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 md:[&>*:last-child]:col-span-2 xl:[&>*:last-child]:col-span-1 gap-4.5 relative z-10 items-stretch">
           <AssetValueByPlantChart assets={filteredAssets} plants={plants} />
           <AmcCard assets={filteredAssets} />
           <DepartmentTrendChart assets={filteredAssets} departments={departments} />

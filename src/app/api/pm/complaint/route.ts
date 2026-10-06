@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { submitPublicComplaint, getPMComplaints, resolvePMComplaint } from '@/lib/store';
 import { validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { canUserEdit } from '@/lib/permissions';
+import { logAuditEvent } from '@/lib/audit';
 
 export async function GET(req: NextRequest) {
   const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
@@ -39,6 +40,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: result.message }, { status: 429 });
     }
 
+    await logAuditEvent({
+      event_category: 'data_change',
+      user_role: 'public_reporter',
+      action: 'PM_COMPLAINT_SUBMITTED',
+      target_table: 'pm_complaints',
+      record_id: result.complaint?.id,
+      changes: { machineId, reporterName, reporterContact, priority: priority || 'medium', description },
+      ip_address: clientIp,
+      user_agent: req.headers.get('user-agent') || 'Unknown',
+    });
+
     return NextResponse.json({ success: true, complaint: result.complaint });
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : 'Failed to submit complaint';
@@ -71,6 +83,18 @@ export async function PATCH(req: NextRequest) {
       technicianCost: technicianCost ? Number(technicianCost) : undefined,
       replacementParts,
       resolvedBy: validation.user.id,
+    });
+
+    await logAuditEvent({
+      event_category: 'data_change',
+      user_id: validation.user.id,
+      user_role: validation.user.role,
+      action: 'PM_COMPLAINT_RESOLVED',
+      target_table: 'pm_complaints',
+      record_id: complaintId,
+      changes: { resolutionNotes, technicianCost, replacementParts },
+      ip_address: req.headers.get('x-forwarded-for') || '127.0.0.1',
+      user_agent: req.headers.get('user-agent') || 'Unknown',
     });
 
     return NextResponse.json({ success: true, message: 'Complaint marked resolved' });

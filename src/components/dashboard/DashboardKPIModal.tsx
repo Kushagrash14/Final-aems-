@@ -27,7 +27,9 @@ import {
   AlertCircle,
   IndianRupee,
   Server,
+  Download,
 } from 'lucide-react';
+import { exportAssetsToExcel } from '@/lib/assetExport';
 import {
   Asset,
   Department,
@@ -39,6 +41,7 @@ import {
   DamageScrapReport,
 } from '@/types/database';
 import { formatCurrency } from '@/lib/utils';
+import DuplicateAssetTypeModal, { type DuplicateApprovalPayload, type DuplicateConflictInfo } from '@/components/assets/DuplicateAssetTypeModal';
 
 export type KPIType = 'total' | 'cost' | 'assigned' | 'available' | 'maintenance' | 'damaged' | 'missing' | 'scrapped';
 
@@ -136,6 +139,7 @@ export default function DashboardKPIModal({
   const [assignmentRemarks, setAssignmentRemarks] = useState('');
   const [assignHostname, setAssignHostname] = useState('');
   const [assignLoading, setAssignLoading] = useState(false);
+  const [duplicateConflict, setDuplicateConflict] = useState<DuplicateConflictInfo | null>(null);
 
   // De-assignment Modal State
   const [deassigningAsset, setDeassigningAsset] = useState<Asset | null>(null);
@@ -216,8 +220,8 @@ export default function DashboardKPIModal({
     setModalError(null);
   };
 
-  const handleExecuteAssign = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleExecuteAssign = async (e?: React.FormEvent, duplicateApproval?: DuplicateApprovalPayload) => {
+    e?.preventDefault();
     if (!assigningAsset) return;
 
     if (assignMode === 'employee' && !selectedEmployee) {
@@ -245,10 +249,15 @@ export default function DashboardKPIModal({
           exactLocation: assignMode === 'in_house' ? assignExactLocation.trim() : undefined,
           remarks: assignmentRemarks.trim() || undefined,
           hostname: assignHostname.trim() ? assignHostname.trim().toUpperCase() : undefined,
+          duplicateApproval: duplicateApproval || undefined,
         }),
       });
 
       const data = await res.json();
+      if (res.status === 409 && data.conflict) {
+        setDuplicateConflict(data.conflict as DuplicateConflictInfo);
+        return;
+      }
       if (!res.ok) throw new Error(data.error || 'Assignment failed');
 
       setLocalAssets((prev) =>
@@ -868,6 +877,31 @@ export default function DashboardKPIModal({
     return filteredAssets.reduce((sum, a) => sum + (Number(a.purchase_cost) || 0), 0);
   }, [filteredAssets]);
 
+  const handleExport = () => {
+    const nameOf = (list: { id: string; name: string }[], id: string, all: string) =>
+      id ? list.find((x) => x.id === id)?.name || id : all;
+    const scope: Record<string, string> = {
+      Report: kpiMeta.title,
+      Location: nameOf(locations, selectedLocation, 'All Locations'),
+      Plant: nameOf(plants, selectedPlant, 'All Plants'),
+      Department: nameOf(departmentOptions, selectedDept, 'All Departments'),
+      'Asset Type': nameOf(categoryOptions, selectedCategory, 'All Asset Types'),
+    };
+    if (searchQuery.trim()) scope.Search = searchQuery.trim();
+    exportAssetsToExcel({
+      reportTitle: `${kpiMeta.title} Report`,
+      fileName: `AEMS_${kpiMeta.title}`,
+      assets: filteredAssets,
+      damageReports,
+      complaints,
+      locations,
+      plants,
+      departments,
+      categories,
+      scope,
+    });
+  };
+
   if (!isOpen) return null;
 
   const IconComponent = kpiMeta.icon;
@@ -912,14 +946,28 @@ export default function DashboardKPIModal({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/80 transition-colors cursor-pointer"
-            title="Close modal (Esc)"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {kpiType !== 'cost' && (
+              <button
+                type="button"
+                onClick={handleExport}
+                disabled={filteredAssets.length === 0}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                title="Download these assets as an Excel report"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Export Excel</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/80 transition-colors cursor-pointer"
+              title="Close modal (Esc)"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* ================================================================= */}
@@ -1355,6 +1403,23 @@ export default function DashboardKPIModal({
       </div>
 
       {/* Toast message in modal */}
+      {duplicateConflict && (
+        <DuplicateAssetTypeModal
+          conflict={duplicateConflict}
+          employeeLabel={selectedEmployee ? `${selectedEmployee.full_name} (${selectedEmployee.emp_code})` : undefined}
+          assetContext={{ assetId: assigningAsset?.id }}
+          onClose={() => setDuplicateConflict(null)}
+          onDeassigned={() => {
+            setDuplicateConflict(null);
+            handleExecuteAssign();
+          }}
+          onApproved={(approval) => {
+            setDuplicateConflict(null);
+            handleExecuteAssign(undefined, approval);
+          }}
+        />
+      )}
+
       {toastMessage && (
         <div className="fixed top-6 right-6 z-[70] flex items-center gap-2 rounded-xl bg-emerald-600 text-white px-4 py-2.5 text-xs font-bold shadow-xl animate-in fade-in slide-in-from-top-2">
           <CheckCircle2 className="w-4 h-4 shrink-0" />

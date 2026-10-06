@@ -448,6 +448,63 @@ CREATE TABLE IF NOT EXISTS email_templates (
   UNIQUE KEY uq_email_templates_key (template_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+-- -----------------------------------------------------------------------------
+-- 9. Smart Mail campaigns (Settings > Smart Mail). Also auto-created at runtime.
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS smart_mail_campaigns (
+  id                  CHAR(36)     NOT NULL,
+  title               VARCHAR(255) NOT NULL,
+  subject             VARCHAR(500) NOT NULL,
+  body_html           MEDIUMTEXT   NOT NULL,
+  recipients          TEXT         NULL,
+  include_employees   TINYINT(1)   NOT NULL DEFAULT 0,
+  target_location_id  CHAR(36)     NULL,
+  target_plant_id     CHAR(36)     NULL,
+  schedule_at         DATETIME(3)  NULL,
+  repeat_mode         VARCHAR(20)  NOT NULL DEFAULT 'once',
+  status              VARCHAR(20)  NOT NULL DEFAULT 'draft',
+  last_sent_at        DATETIME(3)  NULL,
+  last_result         TEXT         NULL,
+  created_by          CHAR(36)     NULL,
+  created_at          DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at          DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  KEY idx_smart_mail_due (status, schedule_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- -----------------------------------------------------------------------------
+-- 10. Plant Head approvals for a second asset of the same type. Also auto-created at runtime.
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS asset_approval_requests (
+  id                  CHAR(36)     NOT NULL,
+  token               VARCHAR(64)  NOT NULL,
+  asset_id            CHAR(36)     NULL,
+  asset_label         VARCHAR(500) NULL,
+  employee_id         CHAR(36)     NOT NULL,
+  employee_label      VARCHAR(255) NULL,
+  category_id         CHAR(36)     NOT NULL,
+  category_name       VARCHAR(255) NOT NULL,
+  existing_assets     TEXT         NULL,
+  to_emails           TEXT         NOT NULL,
+  cc_emails           TEXT         NULL,
+  request_remarks     TEXT         NULL,
+  requested_by        CHAR(36)     NULL,
+  requested_by_label  VARCHAR(255) NULL,
+  requested_by_email  VARCHAR(255) NULL,
+  status              VARCHAR(20)  NOT NULL DEFAULT 'pending',
+  decided_by_name     VARCHAR(255) NULL,
+  decision_remarks    TEXT         NULL,
+  decided_at          DATETIME(3)  NULL,
+  used_at             DATETIME(3)  NULL,
+  created_at          DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at          DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_asset_approval_token (token),
+  KEY idx_asset_approval_employee (employee_id, category_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 -- =============================================================================
 -- SEED DATA
 -- =============================================================================

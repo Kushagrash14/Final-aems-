@@ -50,7 +50,7 @@ export default function BarChartFrame({
   return (
     <div className="flex-1 flex flex-col pt-4" style={{ minHeight }}>
       <div className="flex-1 flex gap-2 min-h-0">
-        <div className="relative w-9 shrink-0 text-[10px] font-bold text-slate-600 tabular-nums">
+        <div className="relative w-10 shrink-0 text-[10px] font-bold text-slate-600 tabular-nums">
           {ticks.map((t) => (
             <span key={t} className="absolute right-0 -translate-y-1/2 leading-none" style={{ top: `${(1 - t / yMax) * 100}%` }}>
               {formatTick(t)}
@@ -124,10 +124,10 @@ export default function BarChartFrame({
       </div>
 
       <div className="flex gap-2 mt-1.5">
-        <div className="w-9 shrink-0" />
+        <div className="w-10 shrink-0" />
         <div className={`flex-1 flex justify-around ${grouped ? 'gap-3' : 'gap-2'}`}>
           {groups.map((g) => (
-            <span key={g.id} className="flex-1 min-w-0 text-center text-xs font-bold text-slate-800 truncate" title={g.label}>
+            <span key={g.id} className="flex-1 min-w-0 text-center text-[11px] font-bold text-slate-800 leading-tight break-words line-clamp-2" title={g.label}>
               {g.label}
             </span>
           ))}

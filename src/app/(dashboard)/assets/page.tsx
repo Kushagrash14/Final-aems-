@@ -339,7 +339,7 @@ const DEFAULT_DEPT_CATEGORIES: Record<string, string[]> = {
     if (!type || type === 'ALL') return true;
     const t = type.toLowerCase().trim();
     const catName = (asset.category?.name || '').toLowerCase().trim();
-    if (catName === t || catName.includes(t) || t.includes(catName)) return true;
+    if (catName && (catName === t || catName.includes(t) || t.includes(catName))) return true;
 
     const name = (asset.name || '').toLowerCase();
     const model = (asset.model || '').toLowerCase();

@@ -5,11 +5,11 @@ import Link from 'next/link';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { User, UserScope, Location, Plant, Department, Category } from '@/types/database';
 import { useSidebar } from './SidebarContext';
+import AssetExportMenu from './AssetExportMenu';
 import {
   Menu,
   Search,
   RotateCw,
-  Download,
   Plus,
   MapPin,
   X,
@@ -929,15 +929,16 @@ function NavbarContent({ user, scope }: NavbarProps) {
           <RotateCw className="w-3.5 h-3.5" />
         </button>
 
-        {/* Download / Export Button (IT Admin) */}
-        {user?.role === 'it_admin' && (
-          <Link
-            href="/bulk-import"
-            title="Bulk Excel Import / Export"
-            className="p-1.5 bg-white/[0.06] hover:bg-white/[0.12] text-slate-300 hover:text-white rounded-lg border border-white/10 shadow-xs transition-colors flex items-center justify-center"
-          >
-            <Download className="w-3.5 h-3.5" />
-          </Link>
+        {/* Excel Export (assets) */}
+        {!isHRView && activeUser && (
+          <AssetExportMenu
+            locations={locations}
+            plants={plants}
+            departments={departments}
+            categories={categories}
+            isItAdmin={isItAdmin}
+            generatedBy={activeUser.email ? `${activeUser.full_name || ''} (${activeUser.email})`.trim() : activeUser.full_name || undefined}
+          />
         )}
 
         {/* "+ Add Employee" Button for HR View */}

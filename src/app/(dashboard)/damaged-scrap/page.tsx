@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { DamageScrapReport, Asset } from '@/types/database';
-import { formatDate } from '@/lib/utils';
+import { formatDateTime } from '@/lib/utils';
 import {
   AlertTriangle,
   FileText,
@@ -530,7 +530,7 @@ function DamagedScrapContent() {
                         DAMAGED
                       </span>
                     )}
-                    <div className="text-[10px] text-slate-500 mt-0.5 font-medium">Logged: {formatDate(r.created_at)}</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5 font-medium">Logged: {formatDateTime(r.created_at)}</div>
                   </td>
 
                   {/* Actions */}

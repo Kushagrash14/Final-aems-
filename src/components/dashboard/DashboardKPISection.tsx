@@ -126,7 +126,7 @@ export default function DashboardKPISection({
     <>
       {/* Full-Bleed 100% Solid Opaque Sticky Shield Connected Directly to Navbar */}
       <div className="sticky top-0 z-20 bg-[#F5F4F0] -mx-3 sm:-mx-4 lg:-mx-5 px-3 sm:px-4 lg:px-5 pt-2 pb-2.5 border-b border-slate-300 shadow-xs">
-        <div className="w-full max-w-[1920px] mx-auto grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 sm:gap-2.5">
+        <div className="w-full max-w-[1920px] mx-auto grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2 sm:gap-2.5">
           {/* Card 1: TOTAL ASSETS */}
           <button
             type="button"

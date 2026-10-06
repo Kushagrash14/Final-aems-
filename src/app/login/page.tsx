@@ -85,14 +85,12 @@ export default function LoginPage() {
   };
 
   // Step 2: Verify OTP
-  const handleVerifyOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanOtp = otp.trim();
+  const handleVerifyOtp = async (e?: React.FormEvent, codeOverride?: string) => {
+    e?.preventDefault();
+    if (loading) return;
+    const cleanOtp = (codeOverride ?? otp).trim();
 
-    if (cleanOtp.length < 6) {
-      setStatusMessage({ type: 'error', text: 'Please enter the complete 6-digit verification code.' });
-      return;
-    }
+    if (cleanOtp.length < 6) return;
 
     setLoading(true);
     setStatusMessage(null);
@@ -133,18 +131,18 @@ export default function LoginPage() {
         {/* Main Card */}
         <div className="bg-white rounded-2xl shadow-[0_4px_25px_rgba(0,0,0,0.06)] border border-slate-200/90 p-6 sm:p-7">
           {/* PG Electroplast Logo */}
-          <div className="flex justify-center mb-4">
+          <div className="flex justify-center mb-5">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src="/pg-logo.svg"
+              src="/pg-logo.png"
               alt="PG Electroplast"
-              className="h-10 w-auto object-contain"
+              className="h-16 w-auto object-contain"
             />
           </div>
 
           <div className="text-center mb-6">
-            <h1 className="text-xl font-extrabold text-slate-900 tracking-tight leading-snug">
-              Asset Entry Management System
+            <h1 className="text-3xl font-extrabold text-slate-900 tracking-wide leading-snug">
+              A.E.M.S
             </h1>
           </div>
 
@@ -251,10 +249,7 @@ export default function LoginPage() {
                       const val = e.target.value.replace(/\D/g, '');
                       setOtp(val);
                       if (val.length === 6 && !loading) {
-                        setTimeout(() => {
-                          const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
-                          handleVerifyOtp(fakeEvent);
-                        }, 100);
+                        handleVerifyOtp(undefined, val);
                       }
                     }}
                     placeholder="••••••"

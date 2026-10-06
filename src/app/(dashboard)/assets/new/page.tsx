@@ -7,6 +7,7 @@ import SearchableCombobox from '@/components/ui/SearchableCombobox';
 import { getAssetPreviewImage } from '@/lib/assetVisuals';
 import { uploadDataUrl } from '@/lib/uploadClient';
 import SmartAssetImportModal, { getDepartmentTheme } from '@/components/assets/SmartAssetImportModal';
+import DuplicateAssetTypeModal, { type DuplicateApprovalPayload, type DuplicateConflictInfo } from '@/components/assets/DuplicateAssetTypeModal';
 import {
   Layers,
   ArrowRight,
@@ -32,6 +33,7 @@ import {
   Building2,
   MapPin,
   Server,
+  Mail,
 } from 'lucide-react';
 
 const SEED_LOCATIONS: Location[] = [
@@ -98,6 +100,18 @@ const DEFAULT_DEPT_CATEGORIES: Record<string, string[]> = {
     'ERGONOMIC CHAIR',
     'BIOMETRIC ATTENDANCE MACHINE',
   ],
+};
+
+type OptionListKey = 'brands' | 'models' | 'vendors' | 'processors' | 'ram_options' | 'storage_options' | 'os_options';
+
+const IT_DEFAULT_OPTIONS: Record<OptionListKey, string[]> = {
+  brands: ['LENOVO', 'DELL', 'HP', 'APPLE', 'ASUS', 'ACER', 'SAMSUNG', 'LG', 'CISCO'],
+  models: ['THINKPAD T14', 'THINKPAD P16 G2', 'LATITUDE 7420', 'OPTIPLEX 7090', 'PROBOOK 450 G9', 'MACBOOK PRO 14', 'MACBOOK AIR M2', 'PRECISION 3580', 'VOSTRO 3510'],
+  vendors: ['REDINGTON INDIA LTD', 'DELL ENTERPRISE SERVICES', 'INGRAM MICRO', 'HP INDIA CORP', 'COMPUCOM SYSTEMS', 'GLOBAL INFOTECH', 'WIPRO ENTERPRISE'],
+  processors: ['INTEL CORE I3', 'INTEL CORE I5 12TH GEN', 'INTEL CORE I5 13TH GEN', 'INTEL CORE I7 13700H', 'INTEL CORE I9', 'AMD RYZEN 5', 'AMD RYZEN 7', 'APPLE M1', 'APPLE M2', 'APPLE M3 PRO'],
+  ram_options: ['4GB DDR4', '8GB DDR4', '16GB DDR4', '16GB DDR5', '32GB DDR5', '64GB DDR5', '128GB DDR5'],
+  storage_options: ['256GB NVME SSD', '512GB NVME SSD', '1TB NVME SSD', '2TB NVME SSD', '1TB HDD', '2TB HDD'],
+  os_options: ['WINDOWS 11 PRO', 'WINDOWS 10 PRO', 'MACOS SONOMA', 'MACOS VENTURA', 'UBUNTU 22.04 LTS', 'RHEL 9', 'NO OS / DOS'],
 };
 
 const DEFAULT_IT_CATEGORY_FIELDS: Record<
@@ -425,27 +439,13 @@ function AssetWizardContent() {
   >([]);
 
   // Searchable Combobox Options States (Persistent with Add & Delete)
-  const [brands, setBrands] = useState<string[]>([
-    'LENOVO', 'DELL', 'HP', 'APPLE', 'ASUS', 'ACER', 'SAMSUNG', 'LG', 'CISCO', 'FANUC', 'SIEMENS',
-  ]);
-  const [models, setModels] = useState<string[]>([
-    'THINKPAD T14', 'THINKPAD P16 G2', 'LATITUDE 7420', 'OPTIPLEX 7090', 'PROBOOK 450 G9', 'MACBOOK PRO 14', 'MACBOOK AIR M2', 'PRECISION 3580', 'VOSTRO 3510',
-  ]);
-  const [vendors, setVendors] = useState<string[]>([
-    'REDINGTON INDIA LTD', 'DELL ENTERPRISE SERVICES', 'INGRAM MICRO', 'HP INDIA CORP', 'COMPUCOM SYSTEMS', 'GLOBAL INFOTECH', 'WIPRO ENTERPRISE',
-  ]);
-  const [processors, setProcessors] = useState<string[]>([
-    'INTEL CORE I3', 'INTEL CORE I5 12TH GEN', 'INTEL CORE I5 13TH GEN', 'INTEL CORE I7 13700H', 'INTEL CORE I9', 'AMD RYZEN 5', 'AMD RYZEN 7', 'APPLE M1', 'APPLE M2', 'APPLE M3 PRO',
-  ]);
-  const [ramOptions, setRamOptions] = useState<string[]>([
-    '4GB DDR4', '8GB DDR4', '16GB DDR4', '16GB DDR5', '32GB DDR5', '64GB DDR5', '128GB DDR5',
-  ]);
-  const [storageOptions, setStorageOptions] = useState<string[]>([
-    '256GB NVME SSD', '512GB NVME SSD', '1TB NVME SSD', '2TB NVME SSD', '1TB HDD', '2TB HDD',
-  ]);
-  const [osOptions, setOsOptions] = useState<string[]>([
-    'WINDOWS 11 PRO', 'WINDOWS 10 PRO', 'MACOS SONOMA', 'MACOS VENTURA', 'UBUNTU 22.04 LTS', 'RHEL 9', 'NO OS / DOS',
-  ]);
+  const [brands, setBrands] = useState<string[]>([]);
+  const [models, setModels] = useState<string[]>([]);
+  const [vendors, setVendors] = useState<string[]>([]);
+  const [processors, setProcessors] = useState<string[]>([]);
+  const [ramOptions, setRamOptions] = useState<string[]>([]);
+  const [storageOptions, setStorageOptions] = useState<string[]>([]);
+  const [osOptions, setOsOptions] = useState<string[]>([]);
   const [dynamicSelectOptions, setDynamicSelectOptions] = useState<Record<string, string[]>>({});
 
   // Custom Field Creator & Hidden Fields State
@@ -456,143 +456,168 @@ function AssetWizardContent() {
   const [newFieldRequired, setNewFieldRequired] = useState(false);
   const [hiddenFieldKeys, setHiddenFieldKeys] = useState<string[]>([]);
 
-  // Load saved options from localStorage on mount
+  // Dropdown option lists are kept separately per department.
+  const optionDeptKey = (selectedDeptName || '').trim().toUpperCase() || 'INFORMATION TECHNOLOGY';
+  const optionStorageKey = (list: OptionListKey) => `aems_${list}::${optionDeptKey}`;
+  const isItOptionDept = optionDeptKey === 'INFORMATION TECHNOLOGY' || optionDeptKey === 'IT';
+  // Lists still in state belong to the previous department until the load effect runs.
+  const [optionsDept, setOptionsDept] = useState<string | null>(null);
+  const optionsReady = optionsDept === optionDeptKey;
+
   useEffect(() => {
-    try {
-      const b = localStorage.getItem('aems_brands');
-      if (b) setBrands(JSON.parse(b));
-      const m = localStorage.getItem('aems_models');
-      if (m) setModels(JSON.parse(m));
-      const v = localStorage.getItem('aems_vendors');
-      if (v) setVendors(JSON.parse(v));
-      const p = localStorage.getItem('aems_processors');
-      if (p) setProcessors(JSON.parse(p));
-      const r = localStorage.getItem('aems_ram_options');
-      if (r) setRamOptions(JSON.parse(r));
-      const s = localStorage.getItem('aems_storage_options');
-      if (s) setStorageOptions(JSON.parse(s));
-      const o = localStorage.getItem('aems_os_options');
-      if (o) setOsOptions(JSON.parse(o));
-    } catch {}
-  }, []);
+    const load = (list: OptionListKey): string[] => {
+      try {
+        // The old shared list mixed entries from every department, so it is discarded.
+        localStorage.removeItem(`aems_${list}`);
+        const saved = localStorage.getItem(`aems_${list}::${optionDeptKey}`);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) return parsed;
+        }
+      } catch {}
+      return isItOptionDept ? IT_DEFAULT_OPTIONS[list] : [];
+    };
+    setBrands(load('brands'));
+    setModels(load('models'));
+    setVendors(load('vendors'));
+    setProcessors(load('processors'));
+    setRamOptions(load('ram_options'));
+    setStorageOptions(load('storage_options'));
+    setOsOptions(load('os_options'));
+    setOptionsDept(optionDeptKey);
+  }, [optionDeptKey, isItOptionDept]);
 
   const handleAddBrand = (b: string) => {
+    if (!optionsReady) return;
     setBrands((prev) => {
       const updated = [b, ...prev.filter((x) => x !== b)];
-      try { localStorage.setItem('aems_brands', JSON.stringify(updated)); } catch {}
+      try { localStorage.setItem(optionStorageKey('brands'), JSON.stringify(updated)); } catch {}
       return updated;
     });
   };
 
   const handleDeleteBrand = (b: string) => {
+    if (!optionsReady) return;
     setBrands((prev) => {
       const updated = prev.filter((x) => x !== b);
-      try { localStorage.setItem('aems_brands', JSON.stringify(updated)); } catch {}
+      try { localStorage.setItem(optionStorageKey('brands'), JSON.stringify(updated)); } catch {}
       return updated;
     });
     if (manufacturer === b) setManufacturer('');
   };
 
   const handleAddModel = (m: string) => {
+    if (!optionsReady) return;
     setModels((prev) => {
       const updated = [m, ...prev.filter((x) => x !== m)];
-      try { localStorage.setItem('aems_models', JSON.stringify(updated)); } catch {}
+      try { localStorage.setItem(optionStorageKey('models'), JSON.stringify(updated)); } catch {}
       return updated;
     });
   };
 
   const handleDeleteModel = (m: string) => {
+    if (!optionsReady) return;
     setModels((prev) => {
       const updated = prev.filter((x) => x !== m);
-      try { localStorage.setItem('aems_models', JSON.stringify(updated)); } catch {}
+      try { localStorage.setItem(optionStorageKey('models'), JSON.stringify(updated)); } catch {}
       return updated;
     });
     if (model === m) setModel('');
   };
 
   const handleAddVendor = (v: string) => {
+    if (!optionsReady) return;
     setVendors((prev) => {
       const updated = [v, ...prev.filter((x) => x !== v)];
-      try { localStorage.setItem('aems_vendors', JSON.stringify(updated)); } catch {}
+      try { localStorage.setItem(optionStorageKey('vendors'), JSON.stringify(updated)); } catch {}
       return updated;
     });
   };
 
   const handleDeleteVendor = (v: string) => {
+    if (!optionsReady) return;
     setVendors((prev) => {
       const updated = prev.filter((x) => x !== v);
-      try { localStorage.setItem('aems_vendors', JSON.stringify(updated)); } catch {}
+      try { localStorage.setItem(optionStorageKey('vendors'), JSON.stringify(updated)); } catch {}
       return updated;
     });
     if (vendorName === v) setVendorName('');
   };
 
   const handleAddProcessor = (p: string) => {
+    if (!optionsReady) return;
     setProcessors((prev) => {
       const updated = [p, ...prev.filter((x) => x !== p)];
-      try { localStorage.setItem('aems_processors', JSON.stringify(updated)); } catch {}
+      try { localStorage.setItem(optionStorageKey('processors'), JSON.stringify(updated)); } catch {}
       return updated;
     });
   };
 
   const handleDeleteProcessor = (p: string) => {
+    if (!optionsReady) return;
     setProcessors((prev) => {
       const updated = prev.filter((x) => x !== p);
-      try { localStorage.setItem('aems_processors', JSON.stringify(updated)); } catch {}
+      try { localStorage.setItem(optionStorageKey('processors'), JSON.stringify(updated)); } catch {}
       return updated;
     });
   };
 
   const handleAddRam = (val: string) => {
+    if (!optionsReady) return;
     const clean = val.trim().toUpperCase();
     if (!clean) return;
     setRamOptions((prev) => {
       const updated = [clean, ...prev.filter((x) => x !== clean)];
-      try { localStorage.setItem('aems_ram_options', JSON.stringify(updated)); } catch {}
+      try { localStorage.setItem(optionStorageKey('ram_options'), JSON.stringify(updated)); } catch {}
       return updated;
     });
   };
 
   const handleDeleteRam = (val: string) => {
+    if (!optionsReady) return;
     setRamOptions((prev) => {
       const updated = prev.filter((x) => x !== val);
-      try { localStorage.setItem('aems_ram_options', JSON.stringify(updated)); } catch {}
+      try { localStorage.setItem(optionStorageKey('ram_options'), JSON.stringify(updated)); } catch {}
       return updated;
     });
   };
 
   const handleAddStorage = (val: string) => {
+    if (!optionsReady) return;
     const clean = val.trim().toUpperCase();
     if (!clean) return;
     setStorageOptions((prev) => {
       const updated = [clean, ...prev.filter((x) => x !== clean)];
-      try { localStorage.setItem('aems_storage_options', JSON.stringify(updated)); } catch {}
+      try { localStorage.setItem(optionStorageKey('storage_options'), JSON.stringify(updated)); } catch {}
       return updated;
     });
   };
 
   const handleDeleteStorage = (val: string) => {
+    if (!optionsReady) return;
     setStorageOptions((prev) => {
       const updated = prev.filter((x) => x !== val);
-      try { localStorage.setItem('aems_storage_options', JSON.stringify(updated)); } catch {}
+      try { localStorage.setItem(optionStorageKey('storage_options'), JSON.stringify(updated)); } catch {}
       return updated;
     });
   };
 
   const handleAddOs = (val: string) => {
+    if (!optionsReady) return;
     const clean = val.trim().toUpperCase();
     if (!clean) return;
     setOsOptions((prev) => {
       const updated = [clean, ...prev.filter((x) => x !== clean)];
-      try { localStorage.setItem('aems_os_options', JSON.stringify(updated)); } catch {}
+      try { localStorage.setItem(optionStorageKey('os_options'), JSON.stringify(updated)); } catch {}
       return updated;
     });
   };
 
   const handleDeleteOs = (val: string) => {
+    if (!optionsReady) return;
     setOsOptions((prev) => {
       const updated = prev.filter((x) => x !== val);
-      try { localStorage.setItem('aems_os_options', JSON.stringify(updated)); } catch {}
+      try { localStorage.setItem(optionStorageKey('os_options'), JSON.stringify(updated)); } catch {}
       return updated;
     });
   };
@@ -856,6 +881,11 @@ function AssetWizardContent() {
   // Form State: Step 3 (Assignment, Location, Plant & Employee)
   const [assignmentMode, setAssignmentMode] = useState<'employee' | 'in_house'>('employee');
   const [exactLocation, setExactLocation] = useState('');
+  const [inHouseDeptName, setInHouseDeptName] = useState('');
+  const [hodName, setHodName] = useState('');
+  const [hodEmpCode, setHodEmpCode] = useState('');
+  const [hodEmail, setHodEmail] = useState('');
+  const [duplicateConflict, setDuplicateConflict] = useState<DuplicateConflictInfo | null>(null);
   const [locationId, setLocationId] = useState('11111111-1111-1111-1111-111111111101');
   const [plantId, setPlantId] = useState('22222222-2222-2222-2222-222222222201');
   const [departmentId, setDepartmentId] = useState('');
@@ -886,9 +916,16 @@ function AssetWizardContent() {
   const [empModalError, setEmpModalError] = useState<string | null>(null);
 
   // Auto-sync department and facility when currentUser or departments are resolved
+  const deptAutoSyncKeyRef = useRef<string | null>(null);
   useEffect(() => {
     const isEditMode = Boolean(searchParams.get('edit'));
     if (isEditMode) return;
+    if (departments.length === 0) return;
+
+    // Apply defaults once per user/URL; otherwise a manual dropdown change gets overwritten.
+    const syncKey = `${currentUser?.id ?? ''}|${currentUser?.role ?? ''}|${searchParams.toString()}`;
+    if (deptAutoSyncKeyRef.current === syncKey) return;
+    deptAutoSyncKeyRef.current = syncKey;
 
     // Non-IT Admins are forced to their assigned facility & department
     if (currentUser && currentUser.role !== 'it_admin') {
@@ -914,8 +951,6 @@ function AssetWizardContent() {
       }
       return;
     }
-
-    if (departments.length === 0) return;
 
     const requestedDeptParam = (
       searchParams.get('department') ||
@@ -2050,6 +2085,7 @@ function AssetWizardContent() {
             assignment_mode: assignmentMode,
           }),
         },
+        categoryName: selectedCategoryName.trim().toUpperCase() || null,
         itAssetType,
         peripherals: peripherals
           .filter((p) => p.is_included && p.peripheral_name.trim().length > 0)
@@ -2119,8 +2155,8 @@ function AssetWizardContent() {
   };
 
   // Final Registration Submission
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (e?: React.FormEvent, duplicateApproval?: DuplicateApprovalPayload) => {
+    e?.preventDefault();
     setError(null);
 
     if (!manufacturer.trim()) {
@@ -2183,6 +2219,13 @@ function AssetWizardContent() {
       }
     }
 
+    const isNewInHouse = assignmentMode === 'in_house' && !searchParams.get('edit');
+    if (isNewInHouse && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(hodEmail.trim())) {
+      setError('Please enter a valid HOD email address. The department HOD is notified when an in-house asset is registered.');
+      setStep(3);
+      return;
+    }
+
     setLoading(true);
 
     const finalCustomValues = {
@@ -2241,6 +2284,16 @@ function AssetWizardContent() {
           }),
           ...(editId ? {} : { status: 'in_service' as const }),
         },
+        categoryName: selectedCategoryName.trim().toUpperCase() || null,
+        duplicateApproval: duplicateApproval || undefined,
+        hodNotification: isNewInHouse
+          ? {
+              departmentName: (inHouseDeptName || selectedDeptName).trim().toUpperCase(),
+              name: hodName.trim().toUpperCase(),
+              empCode: hodEmpCode.trim().toUpperCase(),
+              email: hodEmail.trim().toLowerCase(),
+            }
+          : undefined,
         itAssetType,
         peripherals: peripherals
           .filter((p) => p.is_included && p.peripheral_name.trim().length > 0)
@@ -2264,7 +2317,12 @@ function AssetWizardContent() {
       });
 
       const data = await res.json();
+      if (res.status === 409 && data.conflict) {
+        setDuplicateConflict(data.conflict as DuplicateConflictInfo);
+        return;
+      }
       if (!res.ok) throw new Error(data.error || (editId ? 'Failed to update asset' : 'Failed to register asset'));
+      setDuplicateConflict(null);
 
       // Clear draft upon successful save
       if (activeDraftId) {
@@ -2277,7 +2335,12 @@ function AssetWizardContent() {
         }
       }
 
-      setSuccessToast(editId ? 'Asset updated successfully!' : `Asset successfully registered! Official Tag: ${data.asset.asset_tag}`);
+      const hodNote = data.hodMail
+        ? data.hodMail.sent
+          ? ' • HOD notified by email'
+          : ' • HOD email could not be sent'
+        : '';
+      setSuccessToast(editId ? 'Asset updated successfully!' : `Asset successfully registered! Official Tag: ${data.asset.asset_tag}${hodNote}`);
       setTimeout(() => {
         router.push(editId ? `/assets/${editId}` : '/assets');
       }, 1500);
@@ -2290,6 +2353,29 @@ function AssetWizardContent() {
 
   return (
     <div className={`font-sans ${step === 1 ? 'max-w-6xl mx-auto space-y-4 pb-4' : 'max-w-6xl mx-auto space-y-6 pb-16'}`}>
+      {duplicateConflict && (
+        <DuplicateAssetTypeModal
+          conflict={duplicateConflict}
+          employeeLabel={matchedEmployee ? `${matchedEmployee.full_name} (${matchedEmployee.emp_code})` : undefined}
+          assetContext={{
+            summary: [
+              'New registration',
+              [manufacturer, model].filter(Boolean).join(' ') || null,
+              serialNumber ? `S/N ${serialNumber.toUpperCase()}` : null,
+            ].filter(Boolean).join(' • '),
+          }}
+          onClose={() => setDuplicateConflict(null)}
+          onDeassigned={() => {
+            setDuplicateConflict(null);
+            handleSubmit();
+          }}
+          onApproved={(approval) => {
+            setDuplicateConflict(null);
+            handleSubmit(undefined, approval);
+          }}
+        />
+      )}
+
       {/* Toast Notification */}
       {successToast && (
         <div className="fixed top-5 right-5 z-50 flex items-center gap-2 rounded-2xl bg-emerald-600 text-white px-5 py-3 text-xs font-bold shadow-xl animate-in fade-in slide-in-from-top-4 duration-200">
@@ -2726,10 +2812,10 @@ function AssetWizardContent() {
                 <SearchableCombobox
                   value={manufacturer}
                   onChange={setManufacturer}
-                  options={brands}
+                  options={optionsReady ? brands : []}
                   onAddOption={handleAddBrand}
                   onDeleteOption={handleDeleteBrand}
-                  placeholder="e.g. LENOVO, DELL, HP"
+                  placeholder={isItOptionDept ? 'e.g. LENOVO, DELL, HP' : 'Type or select brand'}
                   required
                 />
               </div>
@@ -2740,10 +2826,10 @@ function AssetWizardContent() {
                 <SearchableCombobox
                   value={model}
                   onChange={setModel}
-                  options={models}
+                  options={optionsReady ? models : []}
                   onAddOption={handleAddModel}
                   onDeleteOption={handleDeleteModel}
-                  placeholder="e.g. THINKPAD P16 G2"
+                  placeholder={isItOptionDept ? 'e.g. THINKPAD P16 G2' : 'Type or select model'}
                   required
                 />
               </div>
@@ -2867,10 +2953,10 @@ function AssetWizardContent() {
                 <SearchableCombobox
                   value={vendorName}
                   onChange={setVendorName}
-                  options={vendors}
+                  options={optionsReady ? vendors : []}
                   onAddOption={handleAddVendor}
                   onDeleteOption={handleDeleteVendor}
-                  placeholder="e.g. REDINGTON INDIA, DELL"
+                  placeholder={isItOptionDept ? 'e.g. REDINGTON INDIA, DELL' : 'Type or select vendor'}
                 />
               </div>
 
@@ -3406,7 +3492,7 @@ function AssetWizardContent() {
                           onChange={(val) => {
                             setCustomValues((prev) => ({ ...prev, processor: val }));
                           }}
-                          options={processors}
+                          options={optionsReady ? processors : []}
                           onAddOption={handleAddProcessor}
                           onDeleteOption={handleDeleteProcessor}
                           placeholder="e.g. INTEL CORE I7 13700H, AMD RYZEN 7"
@@ -3424,7 +3510,7 @@ function AssetWizardContent() {
                           onChange={(val) => {
                             setCustomValues((prev) => ({ ...prev, ram: val }));
                           }}
-                          options={ramOptions}
+                          options={optionsReady ? ramOptions : []}
                           onAddOption={handleAddRam}
                           onDeleteOption={handleDeleteRam}
                           placeholder="e.g. 16GB DDR5, 32GB DDR5"
@@ -3442,7 +3528,7 @@ function AssetWizardContent() {
                           onChange={(val) => {
                             setCustomValues((prev) => ({ ...prev, storage: val }));
                           }}
-                          options={storageOptions}
+                          options={optionsReady ? storageOptions : []}
                           onAddOption={handleAddStorage}
                           onDeleteOption={handleDeleteStorage}
                           placeholder="e.g. 512GB NVME SSD, 1TB NVME SSD"
@@ -3460,7 +3546,7 @@ function AssetWizardContent() {
                           onChange={(val) => {
                             setCustomValues((prev) => ({ ...prev, operating_system: val }));
                           }}
-                          options={osOptions}
+                          options={optionsReady ? osOptions : []}
                           onAddOption={handleAddOs}
                           onDeleteOption={handleDeleteOs}
                           placeholder="e.g. WINDOWS 11 PRO, MACOS SONOMA"
@@ -3945,6 +4031,58 @@ function AssetWizardContent() {
                   Type the specific room, pillar number, gate, rack, or floor location where this equipment is installed.
                 </p>
               </div>
+
+              {/* Department HOD details: HOD is emailed the asset details on registration */}
+              <div className="pt-3 border-t border-emerald-200/80 space-y-2.5">
+                <div className="flex items-center gap-1.5 text-xs font-black text-emerald-950 uppercase tracking-wider">
+                  <Mail className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Department HOD Details (Email notification)</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold text-emerald-900 uppercase mb-1">Department Name</label>
+                    <input
+                      type="text"
+                      value={inHouseDeptName || selectedDeptName}
+                      onChange={handleCapsChange(setInHouseDeptName)}
+                      className="w-full bg-white border border-emerald-300 rounded-xl px-3 py-2 text-xs text-slate-900 font-semibold uppercase focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-emerald-900 uppercase mb-1">HOD Name</label>
+                    <input
+                      type="text"
+                      value={hodName}
+                      onChange={handleCapsChange(setHodName)}
+                      placeholder="e.g. RAJESH KUMAR"
+                      className="w-full bg-white border border-emerald-300 rounded-xl px-3 py-2 text-xs text-slate-900 font-semibold uppercase focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 placeholder:normal-case placeholder:font-normal placeholder:text-slate-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-emerald-900 uppercase mb-1">HOD Employee ID</label>
+                    <input
+                      type="text"
+                      value={hodEmpCode}
+                      onChange={handleCapsChange(setHodEmpCode)}
+                      placeholder="e.g. PGEL-1024"
+                      className="w-full bg-white border border-emerald-300 rounded-xl px-3 py-2 text-xs text-slate-900 font-semibold uppercase font-mono focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 placeholder:normal-case placeholder:font-normal placeholder:text-slate-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-emerald-900 uppercase mb-1">HOD Email *</label>
+                    <input
+                      type="email"
+                      value={hodEmail}
+                      onChange={(e) => setHodEmail(e.target.value)}
+                      placeholder="hod.name@pgel.in"
+                      className="w-full bg-white border border-emerald-300 rounded-xl px-3 py-2 text-xs text-slate-900 font-semibold lowercase focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 placeholder:font-normal placeholder:text-slate-400"
+                    />
+                  </div>
+                </div>
+                <p className="text-[10px] text-emerald-700 font-medium">
+                  On registration, the HOD receives an email with this asset&apos;s tag, type, serial number and installed location.
+                </p>
+              </div>
             </div>
           )}
 
@@ -4342,7 +4480,8 @@ function AssetWizardContent() {
           departments={departments}
           onImportSuccess={(res) => {
             setSuccessToast(
-              `Batch Import Committed! ${res.assets_created} assets imported (${res.assets_assigned} assigned, ${res.assets_in_stock} in stock). ${res.employees_created} new staff profiles provisioned.`
+              `Batch Import Committed! ${res.assets_created} assets imported (${res.assets_assigned} assigned, ${res.assets_in_stock} in stock). ${res.employees_created} new staff profiles provisioned.` +
+                (res.skipped_rows?.length ? ` ${res.skipped_rows.length} row(s) skipped (duplicate serial / conflict).` : '')
             );
             setTimeout(() => setSuccessToast(null), 6000);
           }}

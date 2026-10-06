@@ -43,3 +43,7 @@ next-env.d.ts
 # local-only scripts and legacy Supabase files
 /scratch/
 /supabase/
+
+# demo mode local data
+/.aems-demo-data.json
+/.aems-demo-data.json.tmp
