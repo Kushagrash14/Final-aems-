@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { submitPublicComplaint, getPMComplaints, resolvePMComplaint } from '@/lib/store';
 import { validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
-import { canUserEdit } from '@/lib/permissions';
+import { canUserEdit, isEntityInUserScope, isScopedRole } from '@/lib/permissions';
 import { logAuditEvent } from '@/lib/audit';
+import { getClientIp } from '@/lib/rateLimit';
+import { safeErrorMessage } from '@/lib/apiErrors';
 
 export async function GET(req: NextRequest) {
   const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
@@ -12,20 +14,33 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const complaints = await getPMComplaints();
+  const { user, scope } = validation;
+  const complaints = (await getPMComplaints()).filter((c) => {
+    if (!c.machine) return !isScopedRole(user);
+    return isEntityInUserScope(user, scope, {
+      location_id: c.machine.location_id,
+      plant_id: c.machine.plant_id,
+      department_id: c.machine.department_id,
+    });
+  });
   return NextResponse.json({ complaints });
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { machineId, reporterName, reporterContact, description, priority } = body;
+    const text = (value: unknown, max: number) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
+    const machineId = text(body.machineId, 100);
+    const reporterName = text(body.reporterName, 200);
+    const reporterContact = text(body.reporterContact, 100) || undefined;
+    const description = text(body.description, 2000);
+    const priority = ['low', 'medium', 'high', 'critical'].includes(body.priority) ? body.priority : undefined;
 
     if (!machineId || !reporterName || !description) {
       return NextResponse.json({ error: 'Machine ID, reporter name and issue description are required' }, { status: 400 });
     }
 
-    const clientIp = req.headers.get('x-forwarded-for') || '127.0.0.1';
+    const clientIp = getClientIp(req);
 
     const result = await submitPublicComplaint({
       machineId,
@@ -53,7 +68,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, complaint: result.complaint });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Failed to submit complaint';
+    const errorMsg = safeErrorMessage(err, 'Failed to submit complaint');
     return NextResponse.json({ error: errorMsg }, { status: 500 });
   }
 }
@@ -93,13 +108,13 @@ export async function PATCH(req: NextRequest) {
       target_table: 'pm_complaints',
       record_id: complaintId,
       changes: { resolutionNotes, technicianCost, replacementParts },
-      ip_address: req.headers.get('x-forwarded-for') || '127.0.0.1',
+      ip_address: getClientIp(req),
       user_agent: req.headers.get('user-agent') || 'Unknown',
     });
 
     return NextResponse.json({ success: true, message: 'Complaint marked resolved' });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Resolution failed';
+    const errorMsg = safeErrorMessage(err, 'Resolution failed');
     return NextResponse.json({ error: errorMsg }, { status: 500 });
   }
 }

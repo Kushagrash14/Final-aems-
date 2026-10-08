@@ -11,7 +11,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const { id } = await params;
   const request = await getApprovalRequestById(id);
-  if (!request) return NextResponse.json({ error: 'Approval request not found' }, { status: 404 });
+  const { user } = validation;
+  const canView = request && (user.role === 'it_admin' || user.role === 'admin' || request.requested_by === user.id);
+  if (!request || !canView) return NextResponse.json({ error: 'Approval request not found' }, { status: 404 });
 
   return NextResponse.json({
     request: {

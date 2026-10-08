@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { terminateSession, validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit';
+import { getClientIp } from '@/lib/rateLimit';
 
 export async function POST(req: NextRequest) {
   const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
@@ -8,7 +9,7 @@ export async function POST(req: NextRequest) {
     try {
       const validation = await validateSessionToken(token);
       if (validation.valid && validation.user) {
-        const ip = req.headers.get('x-forwarded-for') || '127.0.0.1';
+        const ip = getClientIp(req);
         const userAgent = req.headers.get('user-agent') || 'Unknown';
         await logAuditEvent({
           event_category: 'session',

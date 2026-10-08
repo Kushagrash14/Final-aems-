@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLocations, getPlants, getDepartments, getCategories } from '@/lib/store';
 import { validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
+import { safeErrorMessage } from '@/lib/apiErrors';
+import { filterOrgUnitsForUser, isScopedRole } from '@/lib/permissions';
 
 export async function GET(req: NextRequest) {
   const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
@@ -19,7 +21,11 @@ export async function GET(req: NextRequest) {
     ]);
 
     const currentUser = validation.user;
-    if (currentUser.role !== 'it_admin') {
+    if (isScopedRole(currentUser)) {
+      locations = filterOrgUnitsForUser(currentUser, validation.scope, 'location', locations);
+      plants = filterOrgUnitsForUser(currentUser, validation.scope, 'plant', plants);
+      departments = filterOrgUnitsForUser(currentUser, validation.scope, 'department', departments);
+    } else if (currentUser.role !== 'it_admin') {
       // Scope locations
       if (currentUser.location_id) {
         locations = locations.filter((l) => l.id === currentUser.location_id);
@@ -53,7 +59,7 @@ export async function GET(req: NextRequest) {
       categories,
     });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to fetch lookups';
+    const message = safeErrorMessage(err, 'Failed to fetch lookups');
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

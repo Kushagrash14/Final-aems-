@@ -6,6 +6,8 @@ import { logAuditEvent } from '@/lib/audit';
 import { approvalForAudit, describeApproval, findSameTypeConflict, parseDuplicateApproval, parseHod, type DuplicateApproval } from '@/lib/assetRules';
 import { sendInHouseHodEmail } from '@/lib/mailer';
 import { consumeDuplicateApproval, notifyEmployeeOfAssignment, releaseDuplicateApproval } from '@/lib/approvalAssignment';
+import { getClientIp } from '@/lib/rateLimit';
+import { safeErrorMessage } from '@/lib/apiErrors';
 
 export async function POST(req: NextRequest) {
   const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
@@ -140,7 +142,7 @@ export async function POST(req: NextRequest) {
         target_table: 'assets',
         record_id: assetId,
         changes: { asset_tag: asset.asset_tag, employee_id: employeeId, ...approvalForAudit(approval) },
-        ip_address: req.headers.get('x-forwarded-for') || '127.0.0.1',
+        ip_address: getClientIp(req),
         user_agent: req.headers.get('user-agent') || 'Unknown',
       });
     }
@@ -152,7 +154,7 @@ export async function POST(req: NextRequest) {
       employeeMail,
     });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Asset assignment failed';
+    const errorMsg = safeErrorMessage(err, 'Asset assignment failed');
     return NextResponse.json({ error: errorMsg }, { status: 500 });
   }
 }

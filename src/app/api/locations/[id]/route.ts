@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { updateLocation, deleteLocation } from '@/lib/store';
 import { validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit';
+import { getClientIp } from '@/lib/rateLimit';
+import { safeErrorMessage } from '@/lib/apiErrors';
 
 export async function PATCH(
   req: NextRequest,
@@ -14,15 +16,27 @@ export async function PATCH(
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // IT Admin or Admin
-  if (validation.user.role !== 'it_admin' && validation.user.role !== 'admin') {
-    return NextResponse.json({ error: 'Access Denied: Only Administrators can modify locations' }, { status: 403 });
+  // Strictly IT Admin
+  if (validation.user.role !== 'it_admin') {
+    return NextResponse.json({ error: 'Access Denied: Only IT Administrators can modify locations' }, { status: 403 });
   }
 
   const { id } = await params;
 
   try {
-    const body = await req.json();
+    const raw = await req.json();
+    const body: Record<string, string | null> = {};
+    for (const key of ['name', 'code', 'address'] as const) {
+      if (raw?.[key] === undefined) continue;
+      const value = raw[key] === null ? null : String(raw[key]).trim().slice(0, 200);
+      if ((key === 'name' || key === 'code') && !value) {
+        return NextResponse.json({ error: `The ${key} cannot be empty` }, { status: 400 });
+      }
+      body[key] = value;
+    }
+    if (Object.keys(body).length === 0) {
+      return NextResponse.json({ error: 'Nothing to update' }, { status: 400 });
+    }
     const updated = await updateLocation(id, body);
 
     if (!updated) {
@@ -37,13 +51,13 @@ export async function PATCH(
       target_table: 'locations',
       record_id: id,
       changes: body,
-      ip_address: req.headers.get('x-forwarded-for') || '127.0.0.1',
+      ip_address: getClientIp(req),
       user_agent: req.headers.get('user-agent') || 'Unknown',
     });
 
     return NextResponse.json({ success: true, location: updated });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Failed to update location';
+    const msg = safeErrorMessage(err, 'Failed to update location');
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
@@ -59,8 +73,8 @@ export async function DELETE(
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // IT Admin or Admin
-  if (validation.user.role !== 'it_admin' && validation.user.role !== 'admin') {
+  // Strictly IT Admin
+  if (validation.user.role !== 'it_admin') {
     return NextResponse.json({ error: 'Access Denied: Only IT Administrators can delete locations' }, { status: 403 });
   }
 
@@ -80,13 +94,13 @@ export async function DELETE(
       target_table: 'locations',
       record_id: id,
       changes: { deleted_id: id },
-      ip_address: req.headers.get('x-forwarded-for') || '127.0.0.1',
+      ip_address: getClientIp(req),
       user_agent: req.headers.get('user-agent') || 'Unknown',
     });
 
     return NextResponse.json({ success: true, message: 'Location deleted successfully' });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Failed to delete location';
+    const msg = safeErrorMessage(err, 'Failed to delete location');
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

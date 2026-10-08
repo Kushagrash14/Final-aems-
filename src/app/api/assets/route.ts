@@ -7,6 +7,8 @@ import { approvalForAudit, findSameTypeConflict, parseDuplicateApproval, parseHo
 import { sendInHouseHodEmail } from '@/lib/mailer';
 import { consumeDuplicateApproval, notifyEmployeeOfAssignment, releaseDuplicateApproval } from '@/lib/approvalAssignment';
 import { linkApprovalToAsset } from '@/lib/assetApprovals';
+import { getClientIp } from '@/lib/rateLimit';
+import { safeErrorMessage } from '@/lib/apiErrors';
 
 function readDocMeta(raw: unknown): Record<string, unknown> {
   if (raw && typeof raw === 'object') return raw as Record<string, unknown>;
@@ -179,7 +181,7 @@ export async function POST(req: NextRequest) {
       target_table: 'assets',
       record_id: created.id,
       changes: { asset_tag: created.asset_tag, name: created.name, category_id: created.category_id },
-      ip_address: req.headers.get('x-forwarded-for') || '127.0.0.1',
+      ip_address: getClientIp(req),
       user_agent: req.headers.get('user-agent') || 'Unknown',
     });
 
@@ -192,7 +194,7 @@ export async function POST(req: NextRequest) {
         target_table: 'assets',
         record_id: created.id,
         changes: { asset_tag: created.asset_tag, employee_id: asset.assigned_employee_id, ...approvalForAudit(approval) },
-        ip_address: req.headers.get('x-forwarded-for') || '127.0.0.1',
+        ip_address: getClientIp(req),
         user_agent: req.headers.get('user-agent') || 'Unknown',
       });
     }
@@ -224,7 +226,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, asset: created, hodMail, employeeMail });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Asset creation failed';
+    const errorMsg = safeErrorMessage(err, 'Asset creation failed');
     return NextResponse.json({ error: errorMsg }, { status: 500 });
   }
 }

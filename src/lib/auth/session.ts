@@ -11,7 +11,10 @@ import { db } from '@/lib/db/client';
 import { SEED_USERS, SEED_SCOPES } from '@/lib/mock-data';
 import { getInactivityTimeoutSeconds } from '@/lib/permissions';
 
-export const SESSION_COOKIE_NAME = 'aems_session_token';
+export { SESSION_COOKIE_NAME } from '@/lib/auth/session-constants';
+
+/** Hard cap on a session's total age, regardless of activity. */
+const SESSION_ABSOLUTE_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 
 // In-memory sessions store for mock mode
 interface MockSession {
@@ -185,8 +188,9 @@ export async function validateSessionToken(rawToken?: string): Promise<SessionVa
     if (!user || !user.is_active) return { valid: false, reason: 'user_inactive' };
 
     const lastActivity = new Date(sessionData.last_activity_at).getTime();
+    const createdAt = new Date(sessionData.created_at).getTime();
     const maxIdleMs = getInactivityTimeoutSeconds(user.role) * 1000;
-    if (now - lastActivity > maxIdleMs) {
+    if (now - lastActivity > maxIdleMs || now - createdAt > SESSION_ABSOLUTE_LIFETIME_MS) {
       await db.from('user_sessions').update({ is_active: false }).eq('id', sessionData.id);
       return { valid: false, reason: 'idle_timeout' };
     }
@@ -240,7 +244,7 @@ function validateMockSession(tokenHash: string, now: number): SessionValidationR
   if (!user || !user.is_active) return { valid: false, reason: 'user_inactive' };
 
   const maxIdleMs = getInactivityTimeoutSeconds(user.role) * 1000;
-  if (now - s.last_activity_at > maxIdleMs) {
+  if (now - s.last_activity_at > maxIdleMs || now - s.created_at > SESSION_ABSOLUTE_LIFETIME_MS) {
     s.is_active = false;
     return { valid: false, reason: 'idle_timeout' };
   }

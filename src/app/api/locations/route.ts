@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLocations, createLocation } from '@/lib/store';
 import { validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit';
+import { getClientIp } from '@/lib/rateLimit';
+import { safeErrorMessage } from '@/lib/apiErrors';
+import { filterOrgUnitsForUser, isScopedRole } from '@/lib/permissions';
 
 export async function GET(req: NextRequest) {
   const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
@@ -14,7 +17,9 @@ export async function GET(req: NextRequest) {
   let locations = await getLocations();
 
   const currentUser = validation.user;
-  if (currentUser.role !== 'it_admin') {
+  if (isScopedRole(currentUser)) {
+    locations = filterOrgUnitsForUser(currentUser, validation.scope, 'location', locations);
+  } else if (currentUser.role !== 'it_admin') {
     if (currentUser.location_id) {
       locations = locations.filter((l) => l.id === currentUser.location_id);
     } else if (validation.scope?.location_ids && validation.scope.location_ids.length > 0) {
@@ -61,13 +66,13 @@ export async function POST(req: NextRequest) {
       target_table: 'locations',
       record_id: location.id,
       changes: { name: location.name, code: location.code, address: location.address },
-      ip_address: req.headers.get('x-forwarded-for') || '127.0.0.1',
+      ip_address: getClientIp(req),
       user_agent: req.headers.get('user-agent') || 'Unknown',
     });
 
     return NextResponse.json({ success: true, location });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Failed to create location';
+    const msg = safeErrorMessage(err, 'Failed to create location');
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

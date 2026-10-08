@@ -21,6 +21,53 @@ export function canUserEdit(user: User, scope?: UserScope | null): boolean {
   return scope ? scope.can_edit : true;
 }
 
+/** ADMIN and USER accounts are confined to their assigned Location / Plant / Department. */
+export function isScopedRole(user: Pick<User, 'role'> | null | undefined): boolean {
+  return user?.role === 'admin' || user?.role === 'user';
+}
+
+/**
+ * The Location / Plant / Department ids an account is assigned to (null = not restricted at that level).
+ * The direct assignment on the user wins; otherwise the scope lists are used.
+ */
+export function getAssignedOrgUnits(
+  user: Pick<User, 'location_id' | 'plant_id' | 'department_id'>,
+  scope: UserScope | null | undefined
+): { locationIds: string[] | null; plantIds: string[] | null; departmentIds: string[] | null } {
+  const pick = (own: string | null | undefined, list: string[] | null | undefined) =>
+    own ? [own] : list && list.length > 0 ? list : null;
+  return {
+    locationIds: pick(user.location_id, scope?.location_ids),
+    plantIds: pick(user.plant_id, scope?.plant_ids),
+    departmentIds: pick(user.department_id, scope?.department_ids),
+  };
+}
+
+/**
+ * Keeps only the org units (locations, plants or departments) an ADMIN / USER account may see.
+ * A level without its own assignment is narrowed by the parent level; an account with nothing
+ * assigned sees nothing.
+ */
+export function filterOrgUnitsForUser<T extends { id: string; location_id?: string | null; plant_id?: string | null }>(
+  user: User,
+  scope: UserScope | null | undefined,
+  level: 'location' | 'plant' | 'department',
+  items: T[]
+): T[] {
+  if (!isScopedRole(user)) return items;
+  const units = getAssignedOrgUnits(user, scope);
+  if (!units.locationIds && !units.plantIds && !units.departmentIds) return [];
+  const own = level === 'location' ? units.locationIds : level === 'plant' ? units.plantIds : units.departmentIds;
+  if (own) return items.filter((item) => own.includes(item.id));
+  if (level === 'plant' && units.locationIds) {
+    return items.filter((item) => item.location_id && units.locationIds!.includes(item.location_id));
+  }
+  if (level === 'department' && units.plantIds) {
+    return items.filter((item) => !item.plant_id || units.plantIds!.includes(item.plant_id));
+  }
+  return items;
+}
+
 /**
  * Check if an asset or record falls within a user's assigned scope
  * - IT Admin: Global enterprise visibility (all locations, plants, departments)
@@ -46,6 +93,16 @@ export function isEntityInUserScope(
   const pltId = entity.current_plant_id || entity.plant_id;
   const deptId = entity.current_department_id || entity.department_id;
   const catId = entity.category_id;
+
+  // ADMIN / USER only see records placed inside their own assigned units: a record with a
+  // missing unit, or an account with nothing assigned, is outside scope.
+  if (isScopedRole(user)) {
+    const units = getAssignedOrgUnits(user, scope);
+    if (!units.locationIds && !units.plantIds && !units.departmentIds) return false;
+    if (units.locationIds && (!locId || !units.locationIds.includes(locId))) return false;
+    if (units.plantIds && (!pltId || !units.plantIds.includes(pltId))) return false;
+    if (units.departmentIds && (!deptId || !units.departmentIds.includes(deptId))) return false;
+  }
 
   // Check direct user location_id, plant_id, department_id
   if (user.location_id && locId && user.location_id !== locId) {
@@ -132,20 +189,64 @@ export function canReviewDamageScrap(user: User, scope?: UserScope | null): bool
 }
 
 /**
- * Check if an Admin can assign a particular role to a new/existing user
- * - IT Admin can assign any role (it_admin, admin, user, hr)
- * - Admin can assign User role ('user') only
+ * The primary IT Admin account. It can never be deleted, demoted or edited by anyone
+ * else, and it is the only account allowed to grant or revoke IT Admin access.
+ */
+export const PRIMARY_IT_ADMIN_EMAIL = 'software.2040@pgel.in';
+
+export function isPrimaryItAdmin(user: Pick<User, 'email'> | null | undefined): boolean {
+  return (user?.email || '').trim().toLowerCase() === PRIMARY_IT_ADMIN_EMAIL;
+}
+
+/**
+ * Check if an actor can assign a particular role to a new/existing user
+ * - Primary IT Admin: any role
+ * - Other IT Admins: any role except IT Admin
+ * - Admin: User role ('user') only
  */
 export function canAssignRole(
   actor: User,
   actorScope: UserScope | null | undefined,
   targetRole: UserRole
 ): boolean {
-  if (actor.role === 'it_admin') return true;
+  if (actor.role === 'it_admin') return targetRole !== 'it_admin' || isPrimaryItAdmin(actor);
   if (actor.role !== 'admin') return false;
 
   // Admin can ONLY assign standard User role
   return targetRole === 'user';
+}
+
+/** Admin may only manage standard users that sit inside the Admin's own Location / Plant / Department. */
+export function isUserWithinAdminScope(actor: User, target: Pick<User, 'role' | 'location_id' | 'plant_id' | 'department_id'>): boolean {
+  if (target.role !== 'user') return false;
+  if (actor.location_id && target.location_id !== actor.location_id) return false;
+  if (actor.plant_id && target.plant_id !== actor.plant_id) return false;
+  if (actor.department_id && target.department_id !== actor.department_id) return false;
+  return true;
+}
+
+/**
+ * Who may edit or delete a given user account.
+ * - Primary IT Admin account: only itself may edit it; nobody may delete it.
+ * - Other IT Admin accounts: only the Primary IT Admin.
+ * - Admin / User accounts: any IT Admin; an Admin only for 'user' accounts in its own scope.
+ */
+export function canManageUserAccount(actor: User, target: User, action: 'edit' | 'delete'): { allowed: boolean; reason?: string } {
+  if (isPrimaryItAdmin(target)) {
+    if (action === 'delete') return { allowed: false, reason: 'The primary IT Admin account cannot be deleted.' };
+    if (actor.id !== target.id) return { allowed: false, reason: 'Only the primary IT Admin can modify this account.' };
+    return { allowed: true };
+  }
+  if (target.role === 'it_admin') {
+    return isPrimaryItAdmin(actor)
+      ? { allowed: true }
+      : { allowed: false, reason: `Only the primary IT Admin (${PRIMARY_IT_ADMIN_EMAIL}) can modify or remove IT Admin accounts.` };
+  }
+  if (actor.role === 'it_admin') return { allowed: true };
+  if (actor.role === 'admin' && action === 'edit' && actor.id !== target.id && isUserWithinAdminScope(actor, target)) {
+    return { allowed: true };
+  }
+  return { allowed: false, reason: 'Access Denied: you can only manage standard users within your own location, plant and department.' };
 }
 
 /**

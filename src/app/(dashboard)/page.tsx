@@ -9,7 +9,7 @@ import {
   getCategories,
 } from '@/lib/store';
 import { validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
-import { isEntityInUserScope } from '@/lib/permissions';
+import { filterOrgUnitsForUser, isEntityInUserScope, isScopedRole } from '@/lib/permissions';
 import DashboardClientView from '@/components/dashboard/DashboardClientView';
 
 export const dynamic = 'force-dynamic';
@@ -59,8 +59,9 @@ export default async function DashboardOverviewPage() {
         department_id: a.current_department_id,
       })
     );
+    const restricted = isScopedRole(user);
     scopedDamageReports = damageReports.filter((d) => {
-      if (!d.asset) return true;
+      if (!d.asset) return !restricted;
       return isEntityInUserScope(user, scope || null, {
         category_id: d.asset.category_id,
         location_id: d.asset.current_location_id,
@@ -69,33 +70,39 @@ export default async function DashboardOverviewPage() {
       });
     });
     scopedComplaints = complaints.filter((c) => {
-      if (!c.machine) return true;
+      if (!c.machine) return !restricted;
       return isEntityInUserScope(user, scope || null, {
         location_id: c.machine.location_id,
         plant_id: c.machine.plant_id,
         department_id: c.machine.department_id,
       });
     });
-    const userLocId = user.location_id || scope?.location_ids?.[0];
-    const userPltId = user.plant_id || scope?.plant_ids?.[0];
-    const userDeptId = user.department_id || scope?.department_ids?.[0];
+    if (restricted) {
+      scopedLocations = filterOrgUnitsForUser(user, scope, 'location', locations);
+      scopedPlants = filterOrgUnitsForUser(user, scope, 'plant', plants);
+      scopedDepartments = filterOrgUnitsForUser(user, scope, 'department', departments);
+    } else {
+      const userLocId = user.location_id || scope?.location_ids?.[0];
+      const userPltId = user.plant_id || scope?.plant_ids?.[0];
+      const userDeptId = user.department_id || scope?.department_ids?.[0];
 
-    if (scope?.location_ids && scope.location_ids.length > 0) {
-      scopedLocations = locations.filter((l) => scope.location_ids!.includes(l.id));
-    } else if (userLocId) {
-      scopedLocations = locations.filter((l) => l.id === userLocId);
-    }
+      if (scope?.location_ids && scope.location_ids.length > 0) {
+        scopedLocations = locations.filter((l) => scope.location_ids!.includes(l.id));
+      } else if (userLocId) {
+        scopedLocations = locations.filter((l) => l.id === userLocId);
+      }
 
-    if (scope?.plant_ids && scope.plant_ids.length > 0) {
-      scopedPlants = plants.filter((p) => scope.plant_ids!.includes(p.id));
-    } else if (userPltId) {
-      scopedPlants = plants.filter((p) => p.id === userPltId);
-    }
+      if (scope?.plant_ids && scope.plant_ids.length > 0) {
+        scopedPlants = plants.filter((p) => scope.plant_ids!.includes(p.id));
+      } else if (userPltId) {
+        scopedPlants = plants.filter((p) => p.id === userPltId);
+      }
 
-    if (scope?.department_ids && scope.department_ids.length > 0) {
-      scopedDepartments = departments.filter((d) => scope.department_ids!.includes(d.id));
-    } else if (userDeptId) {
-      scopedDepartments = departments.filter((d) => d.id === userDeptId);
+      if (scope?.department_ids && scope.department_ids.length > 0) {
+        scopedDepartments = departments.filter((d) => scope.department_ids!.includes(d.id));
+      } else if (userDeptId) {
+        scopedDepartments = departments.filter((d) => d.id === userDeptId);
+      }
     }
   }
 

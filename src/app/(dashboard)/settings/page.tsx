@@ -43,6 +43,7 @@ import * as XLSX from 'xlsx';
 import SmartMailModule from '@/components/settings/SmartMailModule';
 import CategoryRepairCard from '@/components/settings/CategoryRepairCard';
 import { auditActorLabel, describeAuditLog, isHistoricalLog } from '@/lib/auditDescribe';
+import { canManageUserAccount, isPrimaryItAdmin } from '@/lib/permissions';
 
 type SettingsTab = 'users' | 'location_plant' | 'entry_form' | 'bulk_import' | 'security_audit' | 'smart_mail';
 
@@ -61,6 +62,8 @@ function SettingsContent() {
   const isStrictItAdmin = currentUser?.role === 'it_admin';
   const isFacilityAdmin = currentUser?.role === 'admin';
   const canManageUsers = isStrictItAdmin || isFacilityAdmin;
+  // Only the primary IT Admin account can grant, edit or revoke the IT ADMIN role.
+  const isPrimaryAdmin = isPrimaryItAdmin(currentUser);
   // Plant/Location/Forms/Audit tabs are strictly reserved for IT Root Admin
   const isItRootAdmin = isStrictItAdmin;
 
@@ -164,7 +167,7 @@ function SettingsContent() {
     setUserName('');
     setUserEmail('');
     setUserPhone('');
-    setUserRole(isFacilityAdmin ? 'user' : 'it_admin');
+    setUserRole(isFacilityAdmin ? 'user' : isPrimaryAdmin ? 'it_admin' : 'admin');
     setUserLocationId(isFacilityAdmin ? (currentUser?.location_id || '') : '');
     setUserPlantId(isFacilityAdmin ? (currentUser?.plant_id || '') : '');
     setUserDeptId(isFacilityAdmin ? (currentUser?.department_id || '') : '');
@@ -1404,7 +1407,7 @@ function SettingsContent() {
                           </td>
                           <td className="px-3.5 py-2.5 text-right">
                             <div className="flex items-center justify-end gap-1.5">
-                              {canManageUsers ? (
+                              {canManageUsers && currentUser && canManageUserAccount(currentUser, u, 'edit').allowed ? (
                                 <>
                                   <button
                                     type="button"
@@ -1414,7 +1417,7 @@ function SettingsContent() {
                                   >
                                     <Edit3 className="w-3.5 h-3.5" />
                                   </button>
-                                  {isStrictItAdmin && (
+                                  {isStrictItAdmin && u.id !== currentUser.id && canManageUserAccount(currentUser, u, 'delete').allowed && (
                                     <button
                                       type="button"
                                       onClick={() => handleDeleteUser(u)}
@@ -2342,7 +2345,7 @@ function SettingsContent() {
                       }}
                       className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 font-semibold focus:outline-none focus:border-blue-500 cursor-pointer"
                     >
-                      <option value="it_admin">IT ADMIN</option>
+                      {(isPrimaryAdmin || userRole === 'it_admin') && <option value="it_admin">IT ADMIN</option>}
                       <option value="admin">ADMIN</option>
                       <option value="user">USER</option>
                     </select>
@@ -2626,7 +2629,7 @@ function SettingsContent() {
                       }}
                       className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 font-semibold focus:outline-none focus:border-blue-500 cursor-pointer"
                     >
-                      <option value="it_admin">IT ADMIN</option>
+                      {(isPrimaryAdmin || userRole === 'it_admin') && <option value="it_admin">IT ADMIN</option>}
                       <option value="admin">ADMIN</option>
                       <option value="user">USER</option>
                     </select>

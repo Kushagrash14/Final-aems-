@@ -6,19 +6,44 @@ import { SEED_USERS } from '@/lib/mock-data';
 import { db } from '@/lib/db/client';
 import { env } from '@/lib/env';
 import { User } from '@/types/database';
+import { clearRateLimit, formatRetryAfter, getClientIp, hitRateLimit, isRateLimited } from '@/lib/rateLimit';
+import { safeErrorMessage } from '@/lib/apiErrors';
+
+const OTP_FAIL_LIMIT = 10;
+const OTP_FAIL_WINDOW_MS = 30 * 60 * 1000;
 
 export async function POST(req: NextRequest) {
   try {
     const { email, otp } = await req.json();
-    const ip = req.headers.get('x-forwarded-for') || '127.0.0.1';
+    const ip = getClientIp(req);
     const userAgent = req.headers.get('user-agent') || 'Unknown';
 
-    if (!email || !otp) {
+    if (!email || !otp || typeof email !== 'string') {
       return NextResponse.json({ error: 'Email and OTP code are required' }, { status: 400 });
+    }
+
+    const failKey = `otp-fail-email:${email.toLowerCase().trim()}`;
+    const ipLimit = hitRateLimit(`otp-verify-ip:${ip}`, 30, 15 * 60 * 1000);
+    const emailLock = isRateLimited(failKey, OTP_FAIL_LIMIT, OTP_FAIL_WINDOW_MS);
+    if (!ipLimit.allowed || !emailLock.allowed) {
+      const wait = Math.max(ipLimit.retryAfterSeconds, emailLock.retryAfterSeconds);
+      await logAuditEvent({
+        event_category: 'session',
+        user_role: 'anonymous',
+        action: 'OTP_VERIFY_RATE_LIMITED',
+        ip_address: ip,
+        user_agent: userAgent,
+        changes: { email, scope: ipLimit.allowed ? 'email' : 'ip' },
+      });
+      return NextResponse.json(
+        { error: `Too many incorrect attempts. Please try again in ${formatRetryAfter(wait)}.` },
+        { status: 429, headers: { 'Retry-After': String(wait) } }
+      );
     }
 
     const verification = await verifyOtp(email, otp);
     if (!verification.success) {
+      hitRateLimit(failKey, OTP_FAIL_LIMIT, OTP_FAIL_WINDOW_MS);
       // Log failed attempt (will automatically calculate risk level)
       await logAuditEvent({
         event_category: 'session',
@@ -30,6 +55,8 @@ export async function POST(req: NextRequest) {
       });
       return NextResponse.json({ error: verification.message || 'Invalid or expired OTP' }, { status: 401 });
     }
+
+    clearRateLimit(failKey);
 
     // Find the user record
     let user: User | null = null;
@@ -109,7 +136,7 @@ export async function POST(req: NextRequest) {
 
     return response;
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Login verification failed';
+    const errorMsg = safeErrorMessage(err, 'Login verification failed');
     return NextResponse.json({ error: errorMsg }, { status: 500 });
   }
 }

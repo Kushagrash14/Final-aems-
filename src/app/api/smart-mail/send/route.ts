@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit';
 import { getCampaign, recordSendResult, resolveRecipients, sendCampaign } from '@/lib/smartMail';
+import { safeErrorMessage } from '@/lib/apiErrors';
 
 export async function POST(req: NextRequest) {
   const validation = await validateSessionToken(req.cookies.get(SESSION_COOKIE_NAME)?.value);
@@ -40,6 +41,6 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ result });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Send failed' }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Send failed') }, { status: 500 });
   }
 }

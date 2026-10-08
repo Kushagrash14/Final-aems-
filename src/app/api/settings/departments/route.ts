@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDepartments, createDepartment, updateDepartment, deleteDepartment } from '@/lib/store';
 import { validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit';
+import { getClientIp } from '@/lib/rateLimit';
+import { safeErrorMessage } from '@/lib/apiErrors';
+import { filterOrgUnitsForUser, isScopedRole } from '@/lib/permissions';
 
 export async function GET(req: NextRequest) {
   const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
@@ -22,7 +25,9 @@ export async function GET(req: NextRequest) {
 
   // Non-IT Admins are strictly scoped to their assigned department(s)
   const currentUser = validation.user;
-  if (currentUser.role !== 'it_admin') {
+  if (isScopedRole(currentUser)) {
+    departments = filterOrgUnitsForUser(currentUser, validation.scope, 'department', departments);
+  } else if (currentUser.role !== 'it_admin') {
     if (currentUser.department_id) {
       departments = departments.filter((d) => d.id === currentUser.department_id);
     } else if (validation.scope?.department_ids && validation.scope.department_ids.length > 0) {
@@ -73,13 +78,13 @@ export async function POST(req: NextRequest) {
       target_table: 'departments',
       record_id: department.id,
       changes: { name: department.name, code: department.code, plant_id, sub_department },
-      ip_address: req.headers.get('x-forwarded-for') || '127.0.0.1',
+      ip_address: getClientIp(req),
       user_agent: req.headers.get('user-agent') || 'Unknown',
     });
 
     return NextResponse.json({ success: true, department });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Failed to create department';
+    const errorMsg = safeErrorMessage(err, 'Failed to create department');
     return NextResponse.json({ error: errorMsg }, { status: 500 });
   }
 }
@@ -120,13 +125,13 @@ export async function PATCH(req: NextRequest) {
       target_table: 'departments',
       record_id: departmentId,
       changes: updates,
-      ip_address: req.headers.get('x-forwarded-for') || '127.0.0.1',
+      ip_address: getClientIp(req),
       user_agent: req.headers.get('user-agent') || 'Unknown',
     });
 
     return NextResponse.json({ success: true, department: updated });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Failed to update department';
+    const errorMsg = safeErrorMessage(err, 'Failed to update department');
     return NextResponse.json({ error: errorMsg }, { status: 500 });
   }
 }
@@ -165,13 +170,13 @@ export async function DELETE(req: NextRequest) {
       target_table: 'departments',
       record_id: departmentId,
       changes: { deleted_id: departmentId },
-      ip_address: req.headers.get('x-forwarded-for') || '127.0.0.1',
+      ip_address: getClientIp(req),
       user_agent: req.headers.get('user-agent') || 'Unknown',
     });
 
     return NextResponse.json({ success: true, message: 'Department deleted successfully' });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Failed to delete department';
+    const errorMsg = safeErrorMessage(err, 'Failed to delete department');
     return NextResponse.json({ error: errorMsg }, { status: 500 });
   }
 }

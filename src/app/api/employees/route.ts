@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getEmployees, createEmployee, updateEmployee, deleteEmployee } from '@/lib/store';
 import { validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
-import { canUserEdit } from '@/lib/permissions';
+import { canUserEdit, getAssignedOrgUnits, isScopedRole } from '@/lib/permissions';
 import { logAuditEvent } from '@/lib/audit';
+import { getClientIp } from '@/lib/rateLimit';
+import { safeErrorMessage } from '@/lib/apiErrors';
 
 export async function GET(req: NextRequest) {
   const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
@@ -20,6 +22,12 @@ export async function GET(req: NextRequest) {
 
   // Enforce facility & department scoping for non-IT Admin
   if (validation.user.role !== 'it_admin') {
+    if (isScopedRole(validation.user)) {
+      const units = getAssignedOrgUnits(validation.user, validation.scope);
+      if (!units.locationIds && !units.plantIds && !units.departmentIds) {
+        return NextResponse.json({ employees: [] });
+      }
+    }
     if (validation.user.location_id) locationId = validation.user.location_id;
     if (validation.user.plant_id) plantId = validation.user.plant_id;
     if (validation.user.department_id) deptId = validation.user.department_id;
@@ -73,13 +81,13 @@ export async function POST(req: NextRequest) {
       target_table: 'employees',
       record_id: employee.id,
       changes: { emp_code, full_name, email, designation },
-      ip_address: req.headers.get('x-forwarded-for') || '127.0.0.1',
+      ip_address: getClientIp(req),
       user_agent: req.headers.get('user-agent') || 'Unknown',
     });
 
     return NextResponse.json({ success: true, employee });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Failed to create employee';
+    const errorMsg = safeErrorMessage(err, 'Failed to create employee');
     const isConflict = errorMsg.includes('already exists') || errorMsg.includes('duplicate') || errorMsg.includes('unique');
     return NextResponse.json({ error: errorMsg }, { status: isConflict ? 409 : 500 });
   }
@@ -133,13 +141,13 @@ export async function PUT(req: NextRequest) {
       target_table: 'employees',
       record_id: id,
       changes: updates,
-      ip_address: req.headers.get('x-forwarded-for') || '127.0.0.1',
+      ip_address: getClientIp(req),
       user_agent: req.headers.get('user-agent') || 'Unknown',
     });
 
     return NextResponse.json({ success: true, employee: updated });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Failed to update employee';
+    const errorMsg = safeErrorMessage(err, 'Failed to update employee');
     return NextResponse.json({ error: errorMsg }, { status: 500 });
   }
 }
@@ -181,13 +189,13 @@ export async function DELETE(req: NextRequest) {
       target_table: 'employees',
       record_id: id,
       changes: { deleted_employee_id: id },
-      ip_address: req.headers.get('x-forwarded-for') || '127.0.0.1',
+      ip_address: getClientIp(req),
       user_agent: req.headers.get('user-agent') || 'Unknown',
     });
 
     return NextResponse.json({ success: true, message: 'Employee deleted successfully' });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Failed to delete employee';
+    const errorMsg = safeErrorMessage(err, 'Failed to delete employee');
     return NextResponse.json({ error: errorMsg }, { status: 500 });
   }
 }

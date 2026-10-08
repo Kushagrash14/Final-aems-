@@ -213,8 +213,16 @@ export function getApprovalRequestById(id: string): Promise<AssetApprovalRequest
   return findOne('id', id);
 }
 
-export function getApprovalRequestByToken(token: string): Promise<AssetApprovalRequest | null> {
-  return findOne('token', token);
+/** Pending approval links stop working after this long. */
+export const APPROVAL_LINK_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+export async function getApprovalRequestByToken(token: string): Promise<AssetApprovalRequest | null> {
+  if (!/^[a-f0-9]{48}$/.test(token)) return null;
+  const request = await findOne('token', token);
+  if (request?.status === 'pending' && Date.now() - new Date(request.created_at).getTime() > APPROVAL_LINK_TTL_MS) {
+    return null;
+  }
+  return request;
 }
 
 /**

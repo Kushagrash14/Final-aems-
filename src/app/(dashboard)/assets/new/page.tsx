@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Category, CategoryFormField, FieldType, Location, Plant, Department, Employee, User } from '@/types/database';
 import SearchableCombobox from '@/components/ui/SearchableCombobox';
 import { getAssetPreviewImage } from '@/lib/assetVisuals';
+import { isItDepartmentName } from '@/lib/assetType';
 import { uploadDataUrl } from '@/lib/uploadClient';
 import SmartAssetImportModal, { getDepartmentTheme } from '@/components/assets/SmartAssetImportModal';
 import DuplicateAssetTypeModal, { type DuplicateApprovalPayload, type DuplicateConflictInfo } from '@/components/assets/DuplicateAssetTypeModal';
@@ -459,7 +460,7 @@ function AssetWizardContent() {
   // Dropdown option lists are kept separately per department.
   const optionDeptKey = (selectedDeptName || '').trim().toUpperCase() || 'INFORMATION TECHNOLOGY';
   const optionStorageKey = (list: OptionListKey) => `aems_${list}::${optionDeptKey}`;
-  const isItOptionDept = optionDeptKey === 'INFORMATION TECHNOLOGY' || optionDeptKey === 'IT';
+  const isItOptionDept = isItDepartmentName(optionDeptKey);
   // Lists still in state belong to the previous department until the load effect runs.
   const [optionsDept, setOptionsDept] = useState<string | null>(null);
   const optionsReady = optionsDept === optionDeptKey;
@@ -680,7 +681,9 @@ function AssetWizardContent() {
     if (!cleanDept) return;
     setSelectedDeptName(cleanDept);
 
-    const matchedDept = departments.find((d) => d.name.toUpperCase() === cleanDept);
+    // Several plants can have a department with the same name; prefer the selected plant's one.
+    const sameName = departments.filter((d) => d.name.trim().toUpperCase() === cleanDept);
+    const matchedDept = sameName.find((d) => d.plant_id && d.plant_id === plantId) || sameName[0];
     if (matchedDept) {
       setDepartmentId(matchedDept.id);
     }
@@ -697,6 +700,16 @@ function AssetWizardContent() {
     } else {
       setSelectedCategoryName('LAPTOP');
     }
+  };
+
+  // The department record the entry is saved under: the one picked in the dropdown (selected plant's copy when names repeat).
+  const resolveSelectedDepartment = (): Department | undefined => {
+    const name = (selectedDeptName || '').trim().toUpperCase();
+    if (!name) return undefined;
+    const byId = departments.find((d) => d.id === departmentId);
+    if (byId && byId.name.trim().toUpperCase() === name) return byId;
+    const sameName = departments.filter((d) => d.name.trim().toUpperCase() === name);
+    return sameName.find((d) => d.plant_id && d.plant_id === plantId) || sameName[0];
   };
 
   // Add Asset Type for a Specific Department
@@ -1167,6 +1180,17 @@ function AssetWizardContent() {
     }
   }, [locationId, plants, plantId]);
 
+  // Keep the department record on the selected plant when the same department name exists per plant
+  useEffect(() => {
+    if (!plantId || !departmentId) return;
+    const current = departments.find((d) => d.id === departmentId);
+    if (!current?.plant_id || current.plant_id === plantId) return;
+    const samePlant = departments.find(
+      (d) => d.plant_id === plantId && d.name.trim().toUpperCase() === current.name.trim().toUpperCase()
+    );
+    if (samePlant) setDepartmentId(samePlant.id);
+  }, [plantId, departmentId, departments]);
+
   // Cascading Plant updates when Location changes in Employee modal
   useEffect(() => {
     if (newEmpLocationId && plants.length > 0) {
@@ -1356,7 +1380,7 @@ function AssetWizardContent() {
         departments.find((d) => d.id === departmentId)?.name ||
         ''
       ).trim().toUpperCase();
-      const isITDept = deptUpper.includes('IT') || deptUpper.includes('INFORMATION TECHNOLOGY');
+      const isITDept = isItDepartmentName(deptUpper);
 
       // 1. If NOT IT Department, or if Laptop/Desktop, clear dynamic category fields
       if (!isITDept) {
@@ -1938,7 +1962,7 @@ function AssetWizardContent() {
   const getCleanCustomValues = () => {
     const deptUpper = (selectedDeptName || '').trim().toUpperCase();
     const catUpper = (selectedCategoryName || '').trim().toUpperCase();
-    const isITDept = deptUpper.includes('IT') || deptUpper.includes('INFORMATION TECHNOLOGY');
+    const isITDept = isItDepartmentName(deptUpper);
     const isLaptopOrDesktop = isITDept && (catUpper.includes('LAPTOP') || catUpper.includes('DESKTOP'));
     const isNetworkCapable = isLaptopOrDesktop;
 
@@ -2024,13 +2048,16 @@ function AssetWizardContent() {
       }
     }
 
+    const resolvedDept = resolveSelectedDepartment();
+    if (!resolvedDept) {
+      setError('Please select a valid department from the list before saving.');
+      setStep(1);
+      return;
+    }
+
     setLoading(true);
 
     try {
-      const resolvedDept =
-        departments.find((d) => d.name.toUpperCase() === (selectedDeptName || '').trim().toUpperCase()) ||
-        departments.find((d) => d.id === departmentId) ||
-        departments[0];
 
       const targetStatus: 'damaged' | 'missing' | 'in_storage' = isDamagedMode
         ? 'damaged'
@@ -2067,7 +2094,7 @@ function AssetWizardContent() {
           amc_expiry: amcExpiry || null,
           current_location_id: locationId || (locations[0]?.id ?? SEED_LOCATIONS[0].id),
           current_plant_id: plantId || (plants[0]?.id ?? SEED_PLANTS[0].id),
-          current_department_id: resolvedDept?.id || departmentId || (departments[0]?.id ?? '33333333-3333-3333-3333-333333333301'),
+          current_department_id: resolvedDept.id,
           assigned_employee_id: null,
           status: targetStatus,
           invoice_document_path: JSON.stringify({
@@ -2226,6 +2253,13 @@ function AssetWizardContent() {
       return;
     }
 
+    const resolvedDept = resolveSelectedDepartment();
+    if (!resolvedDept) {
+      setError('Please select a valid department from the list before saving.');
+      setStep(1);
+      return;
+    }
+
     setLoading(true);
 
     const finalCustomValues = {
@@ -2242,11 +2276,6 @@ function AssetWizardContent() {
       const compressedPhotos = await Promise.all(
         (assetImages || []).map((img) => compressImage(img, 1024, 1024, 0.75))
       );
-
-      const resolvedDept =
-        departments.find((d) => d.name.toUpperCase() === (selectedDeptName || '').trim().toUpperCase()) ||
-        departments.find((d) => d.id === departmentId) ||
-        departments[0];
 
       const payload = {
         asset: {
@@ -2266,7 +2295,7 @@ function AssetWizardContent() {
           amc_expiry: amcExpiry || null,
           current_location_id: locationId || (locations[0]?.id ?? '11111111-1111-1111-1111-111111111101'),
           current_plant_id: plantId || (plants[0]?.id ?? '22222222-2222-2222-2222-222222222201'),
-          current_department_id: resolvedDept?.id || departmentId || (departments[0]?.id ?? '33333333-3333-3333-3333-333333333301'),
+          current_department_id: resolvedDept.id,
           assigned_employee_id: assignmentMode === 'employee' ? assignedEmployeeId : null,
           invoice_document_path: JSON.stringify({
             photos: compressedPhotos.filter(Boolean),
@@ -3259,7 +3288,7 @@ function AssetWizardContent() {
               ''
             ).trim().toUpperCase();
             const catUpper = (selectedCategoryName || '').trim().toUpperCase();
-            const isITDept = deptUpper.includes('IT') || deptUpper.includes('INFORMATION TECHNOLOGY');
+            const isITDept = isItDepartmentName(deptUpper);
             const isLaptopOrDesktop = isITDept && (catUpper.includes('LAPTOP') || catUpper.includes('DESKTOP'));
             const isNetworkCapable = isLaptopOrDesktop;
 
@@ -3723,7 +3752,7 @@ function AssetWizardContent() {
                       ''
                     ).trim().toUpperCase();
                     const catUpper = (selectedCategoryName || '').trim().toUpperCase();
-                    const isITDept = deptUpper.includes('IT') || deptUpper.includes('INFORMATION TECHNOLOGY');
+                    const isITDept = isItDepartmentName(deptUpper);
                     const isLaptopOrDesktop = isITDept && (catUpper.includes('LAPTOP') || catUpper.includes('DESKTOP'));
 
                     if (isLaptopOrDesktop) {

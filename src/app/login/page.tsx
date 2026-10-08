@@ -71,7 +71,7 @@ export default function LoginPage() {
       }
 
       setStep('otp');
-      setResendCooldown(30);
+      setResendCooldown(60);
       setStatusMessage({
         type: 'success',
         text: `Verification code sent to ${cleanEmail}`,

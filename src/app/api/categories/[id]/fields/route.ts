@@ -3,8 +3,16 @@ import { getCategoryFields, addCategoryField, deleteCategoryField, updateCategor
 import { validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { canUserEdit } from '@/lib/permissions';
 import { logAuditEvent } from '@/lib/audit';
+import { getClientIp } from '@/lib/rateLimit';
+import { safeErrorMessage } from '@/lib/apiErrors';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
+  const validation = await validateSessionToken(token);
+  if (!validation.valid || !validation.user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   const { id } = await params;
   const fields = await getCategoryFields(id);
   return NextResponse.json({ fields });
@@ -42,7 +50,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       display_order: Number(display_order) || 0,
     });
 
-    const ip = req.headers.get('x-forwarded-for') || '127.0.0.1';
+    const ip = getClientIp(req);
     const userAgent = req.headers.get('user-agent') || 'Unknown';
     await logAuditEvent({
       event_category: 'data_change',
@@ -58,7 +66,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     return NextResponse.json({ success: true, field });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Failed to add custom field';
+    const errorMsg = safeErrorMessage(err, 'Failed to add custom field');
     return NextResponse.json({ error: errorMsg }, { status: 500 });
   }
 }
@@ -101,7 +109,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ error: 'Field not found' }, { status: 404 });
     }
 
-    const ip = req.headers.get('x-forwarded-for') || '127.0.0.1';
+    const ip = getClientIp(req);
     const userAgent = req.headers.get('user-agent') || 'Unknown';
     await logAuditEvent({
       event_category: 'data_change',
@@ -117,7 +125,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     return NextResponse.json({ success: true, field: updatedField });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Failed to update custom field';
+    const errorMsg = safeErrorMessage(err, 'Failed to update custom field');
     return NextResponse.json({ error: errorMsg }, { status: 500 });
   }
 }
@@ -136,13 +144,17 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  if (validation.user.role !== 'it_admin' && validation.user.role !== 'admin') {
+    return NextResponse.json({ error: 'Access Denied: Only administrators can delete custom fields' }, { status: 403 });
+  }
+
   if (!canUserEdit(validation.user, validation.scope)) {
     return NextResponse.json({ error: 'View-only access: modifications not permitted' }, { status: 403 });
   }
 
   await deleteCategoryField(fieldId);
 
-  const ip = req.headers.get('x-forwarded-for') || '127.0.0.1';
+  const ip = getClientIp(req);
   const userAgent = req.headers.get('user-agent') || 'Unknown';
   await logAuditEvent({
     event_category: 'data_change',

@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createAndStoreOtp } from '@/lib/auth/otp';
+import { createAndStoreOtp, getOtpRequestWaitSeconds, OTP_RESEND_COOLDOWN_SECONDS } from '@/lib/auth/otp';
+import { formatRetryAfter, getClientIp, hitRateLimit } from '@/lib/rateLimit';
 import { logAuditEvent } from '@/lib/audit';
 import { db } from '@/lib/db/client';
 import { env } from '@/lib/env';
 import { SEED_USERS } from '@/lib/mock-data';
+import { safeErrorMessage } from '@/lib/apiErrors';
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,9 +14,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Valid corporate email address required' }, { status: 400 });
     }
 
-    const normalizedEmail = email.toLowerCase().trim();
-    const ip = req.headers.get('x-forwarded-for') || '127.0.0.1';
+    const normalizedEmail = email.toLowerCase().trim().slice(0, 254);
+    const ip = getClientIp(req);
     const userAgent = req.headers.get('user-agent') || 'Unknown';
+
+    const ipLimit = hitRateLimit(`otp-send-ip:${ip}`, 20, 15 * 60 * 1000);
+    if (!ipLimit.allowed) {
+      await logAuditEvent({
+        event_category: 'session',
+        user_role: 'anonymous',
+        action: 'OTP_RATE_LIMITED',
+        ip_address: ip,
+        user_agent: userAgent,
+        changes: { email: normalizedEmail, scope: 'ip' },
+      });
+      return NextResponse.json(
+        { error: `Too many OTP requests from this network. Please try again in ${formatRetryAfter(ipLimit.retryAfterSeconds)}.` },
+        { status: 429, headers: { 'Retry-After': String(ipLimit.retryAfterSeconds) } }
+      );
+    }
 
     // Verify that the user exists and is active in the database
     let isRegistered = false;
@@ -62,6 +80,28 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const waitSeconds = await getOtpRequestWaitSeconds(normalizedEmail);
+    if (waitSeconds > 0) {
+      await logAuditEvent({
+        event_category: 'session',
+        user_role: 'anonymous',
+        action: 'OTP_RATE_LIMITED',
+        ip_address: ip,
+        user_agent: userAgent,
+        changes: { email: normalizedEmail, scope: 'email', waitSeconds },
+      });
+      return NextResponse.json(
+        {
+          error:
+            waitSeconds <= OTP_RESEND_COOLDOWN_SECONDS
+              ? `An OTP was just sent. Please check your inbox or request a new code in ${formatRetryAfter(waitSeconds)}.`
+              : `Too many OTP requests for this account. Please try again in ${formatRetryAfter(waitSeconds)}.`,
+          retryAfterSeconds: waitSeconds,
+        },
+        { status: 429, headers: { 'Retry-After': String(waitSeconds) } }
+      );
+    }
+
     const result = await createAndStoreOtp(normalizedEmail);
     if (!result.success) {
       await logAuditEvent({
@@ -89,7 +129,7 @@ export async function POST(req: NextRequest) {
       message: 'OTP dispatched successfully',
     });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Internal server error';
+    const errorMsg = safeErrorMessage(err, 'Internal server error');
     return NextResponse.json({ error: errorMsg }, { status: 500 });
   }
 }

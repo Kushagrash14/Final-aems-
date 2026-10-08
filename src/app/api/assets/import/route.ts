@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { batchImportAssets, BatchImportPayload } from '@/lib/store';
 import { logAuditEvent } from '@/lib/audit';
+import { getClientIp } from '@/lib/rateLimit';
+import { safeErrorMessage } from '@/lib/apiErrors';
 
 export async function POST(req: NextRequest) {
   const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
@@ -64,14 +66,14 @@ export async function POST(req: NextRequest) {
       location_id,
       plant_id,
       department_id,
-      ip_address: req.headers.get('x-forwarded-for') || '127.0.0.1',
+      ip_address: getClientIp(req),
       user_agent: req.headers.get('user-agent') || 'Unknown',
     });
 
     return NextResponse.json(result);
   } catch (err: unknown) {
     console.error('Error during batch import:', err);
-    const message = err instanceof Error ? err.message : 'Batch import processing failed';
+    const message = safeErrorMessage(err, 'Batch import processing failed');
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

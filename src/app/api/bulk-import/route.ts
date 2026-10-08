@@ -3,6 +3,8 @@ import { getCategories, getLocations, getPlants, getDepartments, createAsset } f
 import { validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { canPerformBulkImport, isEntityInUserScope } from '@/lib/permissions';
 import { logAuditEvent } from '@/lib/audit';
+import { getClientIp } from '@/lib/rateLimit';
+import { safeErrorMessage } from '@/lib/apiErrors';
 
 export async function POST(req: NextRequest) {
   const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
@@ -109,7 +111,7 @@ export async function POST(req: NextRequest) {
         );
         results.imported++;
       } catch (err: unknown) {
-        const errorMsg = err instanceof Error ? err.message : 'Row insertion failed';
+        const errorMsg = safeErrorMessage(err, 'Row insertion failed');
         results.errors.push({ row: rowNumber, error: errorMsg });
       }
     }
@@ -122,13 +124,13 @@ export async function POST(req: NextRequest) {
       action: 'BULK_ASSET_IMPORT',
       target_table: 'assets',
       changes: { totalRows: rows.length, importedCount: results.imported, errorsCount: results.errors.length },
-      ip_address: req.headers.get('x-forwarded-for') || '127.0.0.1',
+      ip_address: getClientIp(req),
       user_agent: req.headers.get('user-agent') || 'Unknown',
     });
 
     return NextResponse.json({ success: true, results });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Bulk import failed';
+    const errorMsg = safeErrorMessage(err, 'Bulk import failed');
     return NextResponse.json({ error: errorMsg }, { status: 500 });
   }
 }

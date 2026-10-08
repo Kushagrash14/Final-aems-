@@ -8,6 +8,8 @@ import { sendDuplicateApprovalRequestEmail } from '@/lib/mailer';
 import { logAuditEvent } from '@/lib/audit';
 import { getPublicBaseUrl } from '@/lib/publicUrl';
 import { env } from '@/lib/env';
+import { getClientIp } from '@/lib/rateLimit';
+import { safeErrorMessage } from '@/lib/apiErrors';
 
 /** Raises a Plant Head approval request for issuing a second asset of the same type. */
 export async function POST(req: NextRequest) {
@@ -119,7 +121,7 @@ export async function POST(req: NextRequest) {
         cc: request.cc_emails,
         mail_sent: mail.success,
       },
-      ip_address: req.headers.get('x-forwarded-for') || '127.0.0.1',
+      ip_address: getClientIp(req),
       user_agent: req.headers.get('user-agent') || 'Unknown',
     });
 
@@ -129,7 +131,7 @@ export async function POST(req: NextRequest) {
       mail: { sent: mail.success, error: mail.error },
     });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to create approval request';
+    const message = safeErrorMessage(err, 'Failed to create approval request');
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

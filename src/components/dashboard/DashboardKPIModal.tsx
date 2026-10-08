@@ -30,6 +30,7 @@ import {
   Download,
 } from 'lucide-react';
 import { exportAssetsToExcel } from '@/lib/assetExport';
+import { isItDepartmentName } from '@/lib/assetType';
 import {
   Asset,
   Department,
@@ -802,7 +803,7 @@ export default function DashboardKPIModal({
         const belongsToDept =
           aDeptId === selectedDept ||
           aDeptName === targetDeptName ||
-          (targetDeptName.includes('IT') && (aDeptName.includes('IT') || aDeptName.includes('INFORMATION')));
+          (isItDepartmentName(targetDeptName) && isItDepartmentName(aDeptName));
 
         if (belongsToDept) {
           const catName =

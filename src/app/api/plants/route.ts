@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getPlants, createPlant } from '@/lib/store';
 import { validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit';
+import { getClientIp } from '@/lib/rateLimit';
+import { safeErrorMessage } from '@/lib/apiErrors';
+import { filterOrgUnitsForUser, isScopedRole } from '@/lib/permissions';
 
 export async function GET(req: NextRequest) {
   const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
@@ -21,7 +24,9 @@ export async function GET(req: NextRequest) {
 
   // Non-IT Admins are strictly scoped to their assigned plant(s)
   const currentUser = validation.user;
-  if (currentUser.role !== 'it_admin') {
+  if (isScopedRole(currentUser)) {
+    plants = filterOrgUnitsForUser(currentUser, validation.scope, 'plant', plants);
+  } else if (currentUser.role !== 'it_admin') {
     if (currentUser.plant_id) {
       plants = plants.filter((p) => p.id === currentUser.plant_id);
     } else if (validation.scope?.plant_ids && validation.scope.plant_ids.length > 0) {
@@ -73,13 +78,13 @@ export async function POST(req: NextRequest) {
       target_table: 'plants',
       record_id: plant.id,
       changes: { location_id, name: plant.name, code: plant.code },
-      ip_address: req.headers.get('x-forwarded-for') || '127.0.0.1',
+      ip_address: getClientIp(req),
       user_agent: req.headers.get('user-agent') || 'Unknown',
     });
 
     return NextResponse.json({ success: true, plant });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Failed to create plant';
+    const msg = safeErrorMessage(err, 'Failed to create plant');
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

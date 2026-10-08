@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { decideApprovalRequest, getApprovalRequestByToken, type AssetApprovalRequest } from '@/lib/assetApprovals';
 import { sendApprovalDecisionEmail } from '@/lib/mailer';
 import { logAuditEvent } from '@/lib/audit';
+import { getClientIp } from '@/lib/rateLimit';
+import { safeErrorMessage } from '@/lib/apiErrors';
 
 function publicView(r: AssetApprovalRequest) {
   return {
@@ -70,7 +72,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
         employee: updated.employee_label,
         asset_type: updated.category_name,
       },
-      ip_address: req.headers.get('x-forwarded-for') || '127.0.0.1',
+      ip_address: getClientIp(req),
       user_agent: req.headers.get('user-agent') || 'Unknown',
     });
 
@@ -94,7 +96,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
 
     return NextResponse.json({ success: true, request: publicView(updated) });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to record decision';
+    const message = safeErrorMessage(err, 'Failed to record decision');
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

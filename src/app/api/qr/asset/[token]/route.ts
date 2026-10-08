@@ -151,7 +151,6 @@ function buildPdf(asset: Asset): Buffer {
     emp ? `${emp.full_name}${emp.emp_code ? ` (${emp.emp_code})` : ''}` : asset.status === 'in_service' ? 'In-house / Department' : 'Not assigned'
   );
   if (emp) {
-    row('Employee Email', emp.email);
     row('Designation', emp.designation);
   }
 

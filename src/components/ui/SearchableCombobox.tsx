@@ -17,13 +17,16 @@ interface SearchableComboboxProps {
 export default function SearchableCombobox({
   value,
   onChange,
-  options,
+  options: rawOptions,
   onAddOption,
   onDeleteOption,
   placeholder = 'Select or type to search...',
   required = false,
   className = '',
 }: SearchableComboboxProps) {
+  const options = rawOptions.filter(
+    (opt, i) => rawOptions.findIndex((o) => o.trim().toUpperCase() === opt.trim().toUpperCase()) === i
+  );
   const [isOpen, setIsOpen] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [isFiltering, setIsFiltering] = useState(false);

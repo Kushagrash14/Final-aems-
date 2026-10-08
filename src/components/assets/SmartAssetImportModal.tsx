@@ -26,6 +26,7 @@ import {
   HelpCircle,
 } from 'lucide-react';
 import { Location, Plant, Department, Employee, Asset } from '@/types/database';
+import { isItDepartmentName } from '@/lib/assetType';
 
 export interface SmartAssetImportModalProps {
   isOpen: boolean;
@@ -86,7 +87,7 @@ interface ParsedImportRow {
 export function getDepartmentTheme(deptName: string) {
   const upper = (deptName || '').toUpperCase();
 
-  if (upper.includes('INFORMATION') || upper.includes('IT')) {
+  if (isItDepartmentName(upper)) {
     return {
       name: 'Information Technology',
       gradient: 'from-blue-600 via-indigo-600 to-cyan-600',
@@ -285,7 +286,7 @@ export default function SmartAssetImportModal({
 
     // Contextual Sample Data based on Department
     let sampleRows: any[] = [];
-    if (cleanDept.includes('IT') || cleanDept.includes('INFORMATION')) {
+    if (isItDepartmentName(cleanDept)) {
       sampleRows = [
         {
           'Asset Name': 'Lenovo ThinkPad T14 Gen 3',

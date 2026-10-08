@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit';
+import { safeErrorMessage } from '@/lib/apiErrors';
 import {
   createCampaign,
   deleteCampaign,
@@ -28,7 +29,7 @@ export async function GET(req: NextRequest) {
   try {
     return NextResponse.json({ campaigns: await listCampaigns() });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Failed to load mails' }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Failed to load mails') }, { status: 500 });
   }
 }
 
@@ -52,7 +53,7 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json({ campaign });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Failed to save mail' }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Failed to save mail') }, { status: 500 });
   }
 }
 
@@ -105,7 +106,7 @@ export async function PATCH(req: NextRequest) {
     }
     return NextResponse.json({ campaign });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Failed to update mail' }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Failed to update mail') }, { status: 500 });
   }
 }
 
@@ -128,6 +129,6 @@ export async function DELETE(req: NextRequest) {
     });
     return NextResponse.json({ success: true });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Failed to delete mail' }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(err, 'Failed to delete mail') }, { status: 500 });
   }
 }

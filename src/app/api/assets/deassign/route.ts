@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { deassignAssetFromEmployee, getAssetById } from '@/lib/store';
 import { validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { canUserEdit, isEntityInUserScope } from '@/lib/permissions';
+import { safeErrorMessage } from '@/lib/apiErrors';
 
 export async function POST(req: NextRequest) {
   const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
@@ -49,7 +50,7 @@ export async function POST(req: NextRequest) {
       asset: updatedAsset,
     });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Asset de-assignment failed';
+    const errorMsg = safeErrorMessage(err, 'Asset de-assignment failed');
     return NextResponse.json({ error: errorMsg }, { status: 500 });
   }
 }

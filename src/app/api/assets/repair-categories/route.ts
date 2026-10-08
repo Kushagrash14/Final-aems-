@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { repairMisfiledItAssets } from '@/lib/store';
 import { logAuditEvent } from '@/lib/audit';
+import { getClientIp } from '@/lib/rateLimit';
 
 async function requireItAdmin(req: NextRequest) {
   const validation = await validateSessionToken(req.cookies.get(SESSION_COOKIE_NAME)?.value);
@@ -38,7 +39,7 @@ export async function POST(req: NextRequest) {
       target_table: 'assets',
       record_id: result.fixed[0].id,
       changes: { count: result.fixed.length, assets: result.fixed.slice(0, 200) },
-      ip_address: req.headers.get('x-forwarded-for') || '127.0.0.1',
+      ip_address: getClientIp(req),
       user_agent: req.headers.get('user-agent') || 'Unknown',
     });
   }

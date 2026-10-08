@@ -3,6 +3,8 @@ import { getAssetById, getAssetHistory, softDeleteAsset, updateAsset, resolveCat
 import { validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { canDeleteAsset, canUserEdit, isEntityInUserScope } from '@/lib/permissions';
 import { logAuditEvent } from '@/lib/audit';
+import { getClientIp } from '@/lib/rateLimit';
+import { safeErrorMessage } from '@/lib/apiErrors';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -104,13 +106,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       target_table: 'assets',
       record_id: id,
       changes: { updates: sanitizedAuditUpdates },
-      ip_address: req.headers.get('x-forwarded-for') || '127.0.0.1',
+      ip_address: getClientIp(req),
       user_agent: req.headers.get('user-agent') || 'Unknown',
     });
 
     return NextResponse.json({ success: true, asset: updated });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Failed to update asset';
+    const errorMsg = safeErrorMessage(err, 'Failed to update asset');
     return NextResponse.json({ error: errorMsg }, { status: 500 });
   }
 }
@@ -145,7 +147,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   try {
     await softDeleteAsset(id, validation.user.id);
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Failed to delete asset';
+    const errorMsg = safeErrorMessage(err, 'Failed to delete asset');
     return NextResponse.json({ error: errorMsg }, { status: 500 });
   }
 
@@ -157,7 +159,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     target_table: 'assets',
     record_id: id,
     changes: { asset_tag: asset.asset_tag, name: asset.name },
-    ip_address: req.headers.get('x-forwarded-for') || '127.0.0.1',
+    ip_address: getClientIp(req),
     user_agent: req.headers.get('user-agent') || 'Unknown',
   });
 

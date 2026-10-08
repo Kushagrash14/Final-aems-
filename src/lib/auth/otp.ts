@@ -30,6 +30,47 @@ export function hashOtp(otp: string, email: string): string {
     .digest('hex');
 }
 
+export const OTP_RESEND_COOLDOWN_SECONDS = 60;
+export const OTP_MAX_REQUESTS_PER_WINDOW = 5;
+export const OTP_REQUEST_WINDOW_MINUTES = 15;
+
+/**
+ * Durable per-email OTP request limits (survive restarts and work across servers):
+ * one OTP per 60 seconds and at most 5 per 15 minutes.
+ * Returns the seconds to wait, or 0 when a new OTP may be sent.
+ */
+export async function getOtpRequestWaitSeconds(email: string): Promise<number> {
+  const normalizedEmail = email.toLowerCase().trim();
+  const now = Date.now();
+  const windowStart = now - OTP_REQUEST_WINDOW_MINUTES * 60 * 1000;
+
+  let recent: number[] = [];
+  if (env.isMockMode) {
+    recent = mockOtpStore.filter((o) => o.email === normalizedEmail && o.created_at > windowStart).map((o) => o.created_at);
+  } else {
+    const { data, error } = await db
+      .from('auth_otps')
+      .select('created_at')
+      .eq('email', normalizedEmail)
+      .gte('created_at', new Date(windowStart).toISOString());
+    if (error) {
+      console.error('[AEMS OTP] Rate-limit lookup failed:', error.message);
+      return 0;
+    }
+    recent = (data || []).map((r: { created_at: string }) => new Date(r.created_at).getTime()).filter((t) => !Number.isNaN(t));
+  }
+  if (recent.length === 0) return 0;
+
+  recent.sort((a, b) => a - b);
+  const latest = recent[recent.length - 1];
+  const cooldownLeft = Math.ceil((latest + OTP_RESEND_COOLDOWN_SECONDS * 1000 - now) / 1000);
+  if (cooldownLeft > 0) return cooldownLeft;
+  if (recent.length >= OTP_MAX_REQUESTS_PER_WINDOW) {
+    return Math.max(1, Math.ceil((recent[0] + OTP_REQUEST_WINDOW_MINUTES * 60 * 1000 - now) / 1000));
+  }
+  return 0;
+}
+
 /**
  * Generate a secure 6-digit numeric OTP and store its hash in the database
  */

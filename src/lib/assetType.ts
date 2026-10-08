@@ -17,6 +17,15 @@ export function inferItCategoryName(...texts: (string | null | undefined)[]): 'L
   return null;
 }
 
+/**
+ * True for the IT department ("IT", "IT DEPT", "INFORMATION TECHNOLOGY").
+ * Matches "IT" only as a whole word so names like QUALITY or SECURITY don't count.
+ */
+export function isItDepartmentName(name?: string | null): boolean {
+  const n = (name || '').trim().toUpperCase();
+  return n.includes('INFORMATION TECHNOLOGY') || /(^|[^A-Z])IT([^A-Z]|$)/.test(n);
+}
+
 /** Categories that only say "IT" and don't tell which device it is. */
 export function isGenericItCategory(name?: string | null): boolean {
   const n = (name || '').trim().toUpperCase();

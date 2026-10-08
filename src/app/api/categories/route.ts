@@ -3,10 +3,12 @@ import { getCategories, createCategory, updateCategory, deleteCategory } from '@
 import { validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { canUserEdit } from '@/lib/permissions';
 import { logAuditEvent } from '@/lib/audit';
+import { getClientIp } from '@/lib/rateLimit';
+import { safeErrorMessage } from '@/lib/apiErrors';
 
 function requestMeta(req: NextRequest) {
   return {
-    ip_address: req.headers.get('x-forwarded-for') || '127.0.0.1',
+    ip_address: getClientIp(req),
     user_agent: req.headers.get('user-agent') || 'Unknown',
   };
 }
@@ -69,7 +71,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, category: cat });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Failed to create category';
+    const errorMsg = safeErrorMessage(err, 'Failed to create category');
     return NextResponse.json({ error: errorMsg }, { status: 500 });
   }
 }
@@ -115,7 +117,7 @@ export async function PATCH(req: NextRequest) {
     });
     return NextResponse.json({ success: true, category: updated });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Failed to update category';
+    const errorMsg = safeErrorMessage(err, 'Failed to update category');
     return NextResponse.json({ error: errorMsg }, { status: 500 });
   }
 }
@@ -157,7 +159,7 @@ export async function DELETE(req: NextRequest) {
     });
     return NextResponse.json({ success: true });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Failed to delete category';
+    const errorMsg = safeErrorMessage(err, 'Failed to delete category');
     return NextResponse.json({ error: errorMsg }, { status: 500 });
   }
 }

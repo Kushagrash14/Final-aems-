@@ -40,7 +40,10 @@ function getValidatedEnv(): EnvConfig {
   };
   const sessionSecret = process.env.SESSION_SECRET;
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-  const cookieSecure = process.env.SESSION_COOKIE_SECURE === 'true';
+  // Secure cookies need HTTPS; default on whenever the app is served over https unless explicitly disabled.
+  const cookieSecure = process.env.SESSION_COOKIE_SECURE
+    ? process.env.SESSION_COOKIE_SECURE === 'true'
+    : appUrl.startsWith('https://');
 
   const smtpEmail = process.env.SMTP_EMAIL;
   const smtpPassword = process.env.SMTP_PASSWORD;
@@ -69,6 +72,10 @@ function getValidatedEnv(): EnvConfig {
   if (!db.user) missing.push('DB_USER');
   if (!db.database) missing.push('DB_NAME');
   if (!sessionSecret) missing.push('SESSION_SECRET');
+
+  if (sessionSecret && sessionSecret.length < 32 && process.env.NODE_ENV === 'production') {
+    throw new Error('[AEMS v2 FATAL] SESSION_SECRET must be at least 32 characters in production.');
+  }
 
   if (missing.length > 0) {
     // If running in development without credentials, default to mock mode with loud console warning
