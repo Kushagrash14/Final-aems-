@@ -42,6 +42,7 @@ import {
 import * as XLSX from 'xlsx';
 import SmartMailModule from '@/components/settings/SmartMailModule';
 import CategoryRepairCard from '@/components/settings/CategoryRepairCard';
+import ScopeMultiSelect from '@/components/settings/ScopeMultiSelect';
 import { auditActorLabel, describeAuditLog, isHistoricalLog } from '@/lib/auditDescribe';
 import { canManageUserAccount, isPrimaryItAdmin } from '@/lib/permissions';
 
@@ -151,8 +152,8 @@ function SettingsContent() {
   const [userRole, setUserRole] = useState<'it_admin' | 'admin' | 'hr' | 'user'>('user');
   const [userLocationId, setUserLocationId] = useState('');
   const [userPlantId, setUserPlantId] = useState('');
-  const [userDeptId, setUserDeptId] = useState('');
-  const [userSubDept, setUserSubDept] = useState('');
+  const [userDeptIds, setUserDeptIds] = useState<string[]>([]);
+  const [userSubDepts, setUserSubDepts] = useState<string[]>([]);
   const [userCanEdit, setUserCanEdit] = useState(true);
   const [userModalError, setUserModalError] = useState<string | null>(null);
 
@@ -162,6 +163,35 @@ function SettingsContent() {
     return plants.filter((p) => p.location_id === userLocationId);
   }, [plants, userLocationId]);
 
+  const deptOptionsForUser = useMemo(
+    () =>
+      departments.map((d) => ({
+        value: d.id,
+        label: d.code ? `${d.name} (${d.code})` : d.name,
+      })),
+    [departments]
+  );
+
+  const subDeptOptionsForUser = useMemo(() => {
+    const names = new Set<string>();
+    plants.find((p) => p.id === userPlantId)?.sub_departments?.forEach((s) => s && names.add(s.trim()));
+    departments
+      .filter((d) => userDeptIds.includes(d.id) && d.sub_department)
+      .forEach((d) => names.add(d.sub_department!.trim()));
+    return Array.from(names)
+      .filter((s) => s && s.toLowerCase() !== 'none')
+      .map((s) => ({ value: s, label: s }));
+  }, [plants, departments, userPlantId, userDeptIds]);
+
+  const parseSubDepts = (value?: string | null) =>
+    (value || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s && s.toLowerCase() !== 'none');
+
+  const assignedDeptIdsOf = (u?: User | null) =>
+    u?.scope?.department_ids?.length ? u.scope.department_ids : u?.department_id ? [u.department_id] : [];
+
   const openAddUserModal = () => {
     setUserEmpCode('');
     setUserName('');
@@ -170,8 +200,8 @@ function SettingsContent() {
     setUserRole(isFacilityAdmin ? 'user' : isPrimaryAdmin ? 'it_admin' : 'admin');
     setUserLocationId(isFacilityAdmin ? (currentUser?.location_id || '') : '');
     setUserPlantId(isFacilityAdmin ? (currentUser?.plant_id || '') : '');
-    setUserDeptId(isFacilityAdmin ? (currentUser?.department_id || '') : '');
-    setUserSubDept(isFacilityAdmin ? (currentUser?.sub_department || '') : '');
+    setUserDeptIds(isFacilityAdmin ? assignedDeptIdsOf(currentUser).slice(0, 1) : []);
+    setUserSubDepts(isFacilityAdmin ? parseSubDepts(currentUser?.sub_department) : []);
     setUserCanEdit(true);
     setUserModalError(null);
     setShowAddUserModal(true);
@@ -186,8 +216,8 @@ function SettingsContent() {
     setUserRole(u.role);
     setUserLocationId(u.location_id || u.scope?.location_ids?.[0] || '');
     setUserPlantId(u.plant_id || u.scope?.plant_ids?.[0] || '');
-    setUserDeptId(u.department_id || u.scope?.department_ids?.[0] || '');
-    setUserSubDept(u.sub_department || u.scope?.sub_department || '');
+    setUserDeptIds(assignedDeptIdsOf(u));
+    setUserSubDepts(parseSubDepts(u.sub_department || u.scope?.sub_department));
     setUserCanEdit(u.scope?.can_edit ?? true);
     setUserModalError(null);
   };
@@ -203,7 +233,12 @@ function SettingsContent() {
     const isItAdmin = resolvedRole === 'it_admin';
     const resolvedLoc = isFacilityAdmin ? (currentUser?.location_id || userLocationId || null) : (isItAdmin ? null : (userLocationId || null));
     const resolvedPlt = isFacilityAdmin ? (currentUser?.plant_id || userPlantId || null) : (isItAdmin ? null : (userPlantId || null));
-    const resolvedDept = isFacilityAdmin ? (currentUser?.department_id || userDeptId || null) : (isItAdmin ? null : (userDeptId || null));
+    const resolvedDeptIds = isItAdmin ? [] : userDeptIds.length > 0 ? userDeptIds : isFacilityAdmin ? assignedDeptIdsOf(currentUser).slice(0, 1) : [];
+    const resolvedDept = resolvedDeptIds[0] || null;
+    if (!isItAdmin && !resolvedDept) {
+      setUserModalError('Please select at least one department');
+      return;
+    }
 
     setSavingUser(true);
     setUserModalError(null);
@@ -220,11 +255,11 @@ function SettingsContent() {
           location_id: resolvedLoc,
           plant_id: resolvedPlt,
           department_id: resolvedDept,
-          sub_department: isItAdmin ? null : (userSubDept.trim() || 'None'),
+          sub_department: isItAdmin ? null : (userSubDepts.join(', ') || 'None'),
           can_edit: isItAdmin ? true : userCanEdit,
           location_ids: isItAdmin ? null : (resolvedLoc ? [resolvedLoc] : null),
           plant_ids: isItAdmin ? null : (resolvedPlt ? [resolvedPlt] : null),
-          department_ids: isItAdmin ? null : (resolvedDept ? [resolvedDept] : null),
+          department_ids: isItAdmin ? null : resolvedDeptIds,
         }),
       });
 
@@ -258,7 +293,8 @@ function SettingsContent() {
     const isItAdmin = resolvedRole === 'it_admin';
     const resolvedLoc = isFacilityAdmin ? (currentUser?.location_id || userLocationId || null) : (isItAdmin ? null : (userLocationId || null));
     const resolvedPlt = isFacilityAdmin ? (currentUser?.plant_id || userPlantId || null) : (isItAdmin ? null : (userPlantId || null));
-    const resolvedDept = isFacilityAdmin ? (currentUser?.department_id || userDeptId || null) : (isItAdmin ? null : (userDeptId || null));
+    const resolvedDeptIds = isItAdmin ? [] : userDeptIds;
+    const resolvedDept = resolvedDeptIds[0] || null;
 
     setSavingUser(true);
     setUserModalError(null);
@@ -276,11 +312,11 @@ function SettingsContent() {
           location_id: resolvedLoc,
           plant_id: resolvedPlt,
           department_id: resolvedDept,
-          sub_department: isItAdmin ? null : (userSubDept.trim() || 'None'),
+          sub_department: isItAdmin ? null : (userSubDepts.join(', ') || 'None'),
           can_edit: isItAdmin ? true : userCanEdit,
           location_ids: isItAdmin ? null : (resolvedLoc ? [resolvedLoc] : null),
           plant_ids: isItAdmin ? null : (resolvedPlt ? [resolvedPlt] : null),
-          department_ids: isItAdmin ? null : (resolvedDept ? [resolvedDept] : null),
+          department_ids: isItAdmin ? null : (resolvedDeptIds.length > 0 ? resolvedDeptIds : null),
         }),
       });
 
@@ -469,7 +505,6 @@ function SettingsContent() {
         if (data.plant) setPlants((prev) => [...prev, data.plant]);
         setSuccess(`Production Plant "${modalPlantName}" created successfully!`);
       } else if (addEntityTab === 'department') {
-        if (!modalDeptPlantId) throw new Error('Please select a Production Plant');
         if (!modalDeptName.trim()) throw new Error('Department Name is required');
         const deptCode = `DEPT-${modalDeptName.trim().slice(0, 3).toUpperCase()}`;
         const res = await fetch('/api/settings/departments', {
@@ -478,14 +513,14 @@ function SettingsContent() {
           body: JSON.stringify({
             name: modalDeptName.trim(),
             code: deptCode,
-            plant_id: modalDeptPlantId,
+            plant_id: null,
             sub_department: modalSubDept.trim() || null,
           }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed to create department');
         if (data.department) setDepartments((prev) => [...prev, data.department]);
-        setSuccess(`Operating Department "${modalDeptName}" created successfully!`);
+        setSuccess(`Enterprise Operating Department "${modalDeptName}" created successfully across all Locations & Plants!`);
       } else {
         // Full Unified Flow
         let resolvedLocId = modalLocationId;
@@ -532,7 +567,7 @@ function SettingsContent() {
             body: JSON.stringify({
               name: modalDeptName.trim(),
               code: deptCode,
-              plant_id: createdPlantId,
+              plant_id: null,
               sub_department: modalSubDept.trim() || null,
             }),
           });
@@ -1329,6 +1364,10 @@ function SettingsContent() {
                       const userLoc = locations.find((l) => l.id === u.location_id);
                       const userPlt = plants.find((p) => p.id === u.plant_id);
                       const userDept = departments.find((d) => d.id === u.department_id);
+                      const userDeptNames = assignedDeptIdsOf(u)
+                        .map((id) => departments.find((d) => d.id === id)?.name)
+                        .filter(Boolean)
+                        .join(', ');
 
                       return (
                         <tr key={u.id} className="hover:bg-slate-50/80 transition-colors">
@@ -1382,7 +1421,7 @@ function SettingsContent() {
                             ) : (
                               <>
                                 <div className="font-semibold text-slate-800">
-                                  {userDept?.name || (u.scope?.department_ids?.length ? `${u.scope.department_ids.length} Dept(s)` : 'All Departments')}
+                                  {userDeptNames || userDept?.name || (u.scope?.department_ids?.length ? `${u.scope.department_ids.length} Dept(s)` : 'All Departments')}
                                 </div>
                                 <div className="text-[11px] text-slate-400">
                                   Sub: {u.sub_department || 'None'}
@@ -1479,14 +1518,26 @@ function SettingsContent() {
                 </div>
 
                 {isItRootAdmin ? (
-                  <button
-                    type="button"
-                    onClick={() => openAddPlantModal('location')}
-                    className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-2xs transition-all cursor-pointer whitespace-nowrap"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>+ Add Location / Plant / Dept</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => openAddPlantModal('department')}
+                      className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-2xs transition-all cursor-pointer whitespace-nowrap"
+                      title="Add Global Operating Department"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span>+ Add Operating Department</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openAddPlantModal('location')}
+                      className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-2xs transition-all cursor-pointer whitespace-nowrap"
+                      title="Add Location or Plant"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>+ Add Location / Plant</span>
+                    </button>
+                  </div>
                 ) : (
                   <span className="text-xs text-slate-400 italic bg-slate-50 px-2 py-1 rounded border border-slate-200">
                     Configuration reserved for IT Admin
@@ -1502,7 +1553,7 @@ function SettingsContent() {
                   <tr>
                     <th className="px-4 py-3.5">Location Name</th>
                     <th className="px-4 py-3.5">Plants</th>
-                    <th className="px-4 py-3.5">Department &amp; Sub Dept</th>
+                    <th className="px-4 py-3.5">Operating Departments</th>
                     <th className="px-4 py-3.5">Capacity</th>
                     <th className="px-4 py-3.5 text-right">Actions</th>
                   </tr>
@@ -1517,7 +1568,6 @@ function SettingsContent() {
                   ) : (
                     filteredLocations.map((loc) => {
                       const childPlants = plants.filter((p) => p.location_id === loc.id);
-                      const locDepts = departments.filter((d) => !d.plant_id || childPlants.some((p) => p.id === d.plant_id));
 
                       return (
                         <tr key={loc.id} className="hover:bg-slate-50/80 transition-colors">
@@ -1566,14 +1616,6 @@ function SettingsContent() {
                                       <div className="flex items-center gap-1">
                                         <button
                                           type="button"
-                                          onClick={() => openAddPlantModal('department', loc.id, plant.id)}
-                                          className="text-[10px] font-bold text-blue-600 hover:bg-blue-100 bg-blue-50 px-1.5 py-0.5 rounded transition-all cursor-pointer border border-blue-200"
-                                          title="Add Department under Plant"
-                                        >
-                                          + Dept
-                                        </button>
-                                        <button
-                                          type="button"
                                           onClick={() => {
                                             setEditingPlant(plant);
                                             setEditPlantName(plant.name);
@@ -1600,55 +1642,19 @@ function SettingsContent() {
                             )}
                           </td>
 
-                          {/* DEPARTMENTS & SUB DEPTS */}
+                          {/* OPERATING DEPARTMENTS */}
                           <td className="px-4 py-4 align-top">
                             {childPlants.length === 0 ? (
                               <span className="text-slate-300">—</span>
-                            ) : locDepts.length === 0 ? (
-                              <span className="text-slate-400 italic text-[11px]">No departments configured</span>
                             ) : (
-                              <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
-                                {locDepts.map((d) => {
-                                  const parentPlant = childPlants.find((p) => p.id === d.plant_id);
-                                  return (
-                                    <div key={d.id} className="flex items-center justify-between bg-slate-50 border border-slate-200/60 p-1.5 rounded-md">
-                                      <div>
-                                        <div className="font-bold text-slate-800 text-[11px]">
-                                          {d.name} <span className="text-[9px] font-normal text-slate-400">({parentPlant ? parentPlant.name : 'Corporate / Global'})</span>
-                                        </div>
-                                        {d.sub_department && (
-                                          <span className="inline-block text-[9px] bg-slate-200/60 text-slate-600 px-1 rounded font-medium">
-                                            Sub: {d.sub_department}
-                                          </span>
-                                        )}
-                                      </div>
-                                      {isItRootAdmin && (
-                                        <div className="flex items-center gap-0.5">
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              setEditingDept(d);
-                                              setEditDeptName(d.name);
-                                              setEditSubDept(d.sub_department || '');
-                                            }}
-                                            className="text-slate-400 hover:text-blue-600 cursor-pointer p-0.5"
-                                            title="Edit Department"
-                                          >
-                                            <Edit3 className="w-3 h-3" />
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => handleDeleteDepartment(d)}
-                                            className="text-slate-400 hover:text-rose-600 cursor-pointer p-0.5"
-                                            title="Delete Department"
-                                          >
-                                            <Trash2 className="w-3 h-3" />
-                                          </button>
-                                        </div>
-                                      )}
-                                    </div>
-                                  );
-                                })}
+                              <div className="space-y-1.5">
+                                <span className="inline-flex items-center gap-1 rounded bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-mono font-bold text-emerald-700">
+                                  <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                                  All {departments.length} Enterprise Depts Active
+                                </span>
+                                <p className="text-[10px] text-slate-500 leading-relaxed font-medium">
+                                  Departments operate enterprise-wide across all plants. User permissions assigned individually by IT Admin.
+                                </p>
                               </div>
                             )}
                           </td>
@@ -1663,7 +1669,7 @@ function SettingsContent() {
                               <br />
                               <span className="inline-flex items-center gap-1 rounded bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-mono font-bold text-emerald-700">
                                 <ShieldCheck className="w-3 h-3" />
-                                {locDepts.length} Dept(s)
+                                {departments.length} Dept(s) Global
                               </span>
                             </div>
                           </td>
@@ -1701,6 +1707,122 @@ function SettingsContent() {
                         </tr>
                       );
                     })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Master Enterprise Departments Directory */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="p-3 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
+              <div>
+                <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                  <span>Enterprise Operating Departments ({departments.length})</span>
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                    Global Across All Locations &amp; Plants
+                  </span>
+                </h2>
+                <p className="text-[11px] text-slate-500">
+                  Company-wide standard departments. IT Admin grants department access to specific Admins and Users in the User Directory.
+                </p>
+              </div>
+
+              {isItRootAdmin && (
+                <button
+                  type="button"
+                  onClick={() => openAddPlantModal('department')}
+                  className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-2xs transition-all cursor-pointer whitespace-nowrap self-start sm:self-auto"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>+ Add Operating Department</span>
+                </button>
+              )}
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-500 uppercase font-bold border-b border-slate-200">
+                  <tr>
+                    <th className="px-4 py-3">Dept Code</th>
+                    <th className="px-4 py-3">Department Name</th>
+                    <th className="px-4 py-3">Sub-Departments</th>
+                    <th className="px-4 py-3">Scope Boundary</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-700">
+                  {departments.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-6 text-center text-slate-400">
+                        No operating departments configured yet. Click &quot;+ Add Operating Department&quot; above to create one.
+                      </td>
+                    </tr>
+                  ) : (
+                    departments
+                      .filter((d) => {
+                        if (!structureSearchQuery.trim()) return true;
+                        const q = structureSearchQuery.toLowerCase().trim();
+                        return (
+                          d.name.toLowerCase().includes(q) ||
+                          (d.code && d.code.toLowerCase().includes(q)) ||
+                          (d.sub_department && d.sub_department.toLowerCase().includes(q))
+                        );
+                      })
+                      .map((d) => (
+                        <tr key={d.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="px-4 py-3 font-mono font-bold text-blue-600">
+                            {d.code || 'DEPT-GEN'}
+                          </td>
+                          <td className="px-4 py-3 font-bold text-slate-900">
+                            {d.name}
+                          </td>
+                          <td className="px-4 py-3">
+                            {d.sub_department ? (
+                              <span className="inline-block text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-medium border border-slate-200">
+                                {d.sub_department}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 italic text-[11px]">None (Main Dept)</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                              Enterprise Global (All Locations &amp; Plants)
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            {isItRootAdmin ? (
+                              <div className="flex items-center justify-end gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingDept(d);
+                                    setEditDeptName(d.name);
+                                    setEditSubDept(d.sub_department || '');
+                                  }}
+                                  className="p-1 text-slate-400 hover:text-blue-600 transition-colors cursor-pointer"
+                                  title="Edit Department"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteDepartment(d)}
+                                  className="p-1 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                                  title="Delete Department"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-slate-400 italic">View Only</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))
                   )}
                 </tbody>
               </table>
@@ -1962,6 +2084,20 @@ function SettingsContent() {
               <p className="text-xs text-slate-600">
                 Successfully committed <span className="text-emerald-600 font-bold">{importResult.imported}</span> assets to the enterprise registry.
               </p>
+
+              {importResult.errors && importResult.errors.length > 0 && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-left text-xs max-h-40 overflow-y-auto">
+                  <span className="font-bold text-rose-800 block mb-1">
+                    Skipped Rows ({importResult.errors.length}):
+                  </span>
+                  {importResult.errors.map((e, i) => (
+                    <div key={i} className="text-rose-700 py-0.5">
+                      Row {e.row}: {e.error}
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div className="pt-4 flex items-center justify-center gap-3">
                 <button
                   type="button"
@@ -2338,8 +2474,8 @@ function SettingsContent() {
                         if (newRole === 'it_admin') {
                           setUserLocationId('');
                           setUserPlantId('');
-                          setUserDeptId('');
-                          setUserSubDept('');
+                          setUserDeptIds([]);
+                          setUserSubDepts([]);
                           setUserCanEdit(true);
                         }
                       }}
@@ -2362,7 +2498,7 @@ function SettingsContent() {
                     </span>
                     <span className="text-[9px] bg-blue-600 text-white font-bold px-1.5 py-0.5 rounded uppercase">Your Facility</span>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="grid grid-cols-2 gap-2 text-xs">
                     <div className="bg-white p-2 rounded-lg border border-blue-100">
                       <span className="text-[10px] text-slate-400 block font-semibold">Location</span>
                       <span className="font-bold text-slate-800 truncate block">
@@ -2375,24 +2511,32 @@ function SettingsContent() {
                         {plants.find((p) => p.id === userPlantId)?.name || 'Production Plant'}
                       </span>
                     </div>
-                    <div className="bg-white p-2 rounded-lg border border-blue-100">
-                      <span className="text-[10px] text-slate-400 block font-semibold">Department</span>
-                      <span className="font-bold text-blue-700 truncate block">
-                        {departments.find((d) => d.id === userDeptId)?.name || 'Operating Dept'}
-                      </span>
-                    </div>
                   </div>
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                      Sub Department (Optional)
-                    </label>
-                    <input
-                      type="text"
-                      value={userSubDept}
-                      onChange={(e) => setUserSubDept(e.target.value)}
-                      placeholder="e.g. Line 1, Shift B, or None"
-                      className="w-full bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-500 font-medium"
-                    />
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                        Department(s) *
+                      </label>
+                      <ScopeMultiSelect
+                        options={deptOptionsForUser}
+                        selected={userDeptIds}
+                        onChange={setUserDeptIds}
+                        placeholder="-- Select Department(s) --"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                        Sub Department(s) (Optional)
+                      </label>
+                      <ScopeMultiSelect
+                        options={subDeptOptionsForUser}
+                        selected={userSubDepts}
+                        onChange={setUserSubDepts}
+                        placeholder="None"
+                        allowCustom
+                        customPlaceholder="e.g. Line 1"
+                      />
+                    </div>
                   </div>
                 </div>
               ) : userRole === 'it_admin' ? (
@@ -2462,33 +2606,27 @@ function SettingsContent() {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Department *
+                        Department(s) *
                       </label>
-                      <select
-                        required
-                        value={userDeptId}
-                        onChange={(e) => setUserDeptId(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500 cursor-pointer"
-                      >
-                        <option value="">-- Select Department --</option>
-                        {departments.map((d) => (
-                          <option key={d.id} value={d.id}>
-                            {d.name} ({d.code})
-                          </option>
-                        ))}
-                      </select>
+                      <ScopeMultiSelect
+                        options={deptOptionsForUser}
+                        selected={userDeptIds}
+                        onChange={setUserDeptIds}
+                        placeholder="-- Select Department(s) --"
+                      />
                     </div>
 
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Sub Department (or "None")
+                        Sub Department(s) (or &quot;None&quot;)
                       </label>
-                      <input
-                        type="text"
-                        value={userSubDept}
-                        onChange={(e) => setUserSubDept(e.target.value)}
-                        placeholder="e.g. Line 3 or None"
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white"
+                      <ScopeMultiSelect
+                        options={subDeptOptionsForUser}
+                        selected={userSubDepts}
+                        onChange={setUserSubDepts}
+                        placeholder="None"
+                        allowCustom
+                        customPlaceholder="e.g. Line 3"
                       />
                     </div>
                   </div>
@@ -2622,8 +2760,8 @@ function SettingsContent() {
                         if (newRole === 'it_admin') {
                           setUserLocationId('');
                           setUserPlantId('');
-                          setUserDeptId('');
-                          setUserSubDept('');
+                          setUserDeptIds([]);
+                          setUserSubDepts([]);
                           setUserCanEdit(true);
                         }
                       }}
@@ -2646,7 +2784,7 @@ function SettingsContent() {
                     </span>
                     <span className="text-[9px] bg-blue-600 text-white font-bold px-1.5 py-0.5 rounded uppercase">Your Facility</span>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="grid grid-cols-2 gap-2 text-xs">
                     <div className="bg-white p-2 rounded-lg border border-blue-100">
                       <span className="text-[10px] text-slate-400 block font-semibold">Location</span>
                       <span className="font-bold text-slate-800 truncate block">
@@ -2659,24 +2797,32 @@ function SettingsContent() {
                         {plants.find((p) => p.id === userPlantId)?.name || 'Production Plant'}
                       </span>
                     </div>
-                    <div className="bg-white p-2 rounded-lg border border-blue-100">
-                      <span className="text-[10px] text-slate-400 block font-semibold">Department</span>
-                      <span className="font-bold text-blue-700 truncate block">
-                        {departments.find((d) => d.id === userDeptId)?.name || 'Operating Dept'}
-                      </span>
-                    </div>
                   </div>
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                      Sub Department
-                    </label>
-                    <input
-                      type="text"
-                      value={userSubDept}
-                      onChange={(e) => setUserSubDept(e.target.value)}
-                      placeholder="e.g. Line 1, Shift B, or None"
-                      className="w-full bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-500 font-medium"
-                    />
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                        Department(s)
+                      </label>
+                      <ScopeMultiSelect
+                        options={deptOptionsForUser}
+                        selected={userDeptIds}
+                        onChange={setUserDeptIds}
+                        placeholder="-- Select Department(s) --"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                        Sub Department(s)
+                      </label>
+                      <ScopeMultiSelect
+                        options={subDeptOptionsForUser}
+                        selected={userSubDepts}
+                        onChange={setUserSubDepts}
+                        placeholder="None"
+                        allowCustom
+                        customPlaceholder="e.g. Line 1"
+                      />
+                    </div>
                   </div>
                 </div>
               ) : userRole === 'it_admin' ? (
@@ -2744,32 +2890,27 @@ function SettingsContent() {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Department
+                        Department(s)
                       </label>
-                      <select
-                        value={userDeptId}
-                        onChange={(e) => setUserDeptId(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500 cursor-pointer"
-                      >
-                        <option value="">-- All / Unrestricted --</option>
-                        {departments.map((d) => (
-                          <option key={d.id} value={d.id}>
-                            {d.name}
-                          </option>
-                        ))}
-                      </select>
+                      <ScopeMultiSelect
+                        options={deptOptionsForUser}
+                        selected={userDeptIds}
+                        onChange={setUserDeptIds}
+                        placeholder="-- Select Department(s) --"
+                      />
                     </div>
 
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Sub Department
+                        Sub Department(s)
                       </label>
-                      <input
-                        type="text"
-                        value={userSubDept}
-                        onChange={(e) => setUserSubDept(e.target.value)}
-                        placeholder="e.g. None"
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white"
+                      <ScopeMultiSelect
+                        options={subDeptOptionsForUser}
+                        selected={userSubDepts}
+                        onChange={setUserSubDepts}
+                        placeholder="None"
+                        allowCustom
+                        customPlaceholder="e.g. Line 3"
                       />
                     </div>
                   </div>
@@ -2988,29 +3129,22 @@ function SettingsContent() {
                 </div>
               )}
 
-              {/* MODE 3: DEPARTMENT ONLY */}
+              {/* MODE 3: DEPARTMENT ONLY (ENTERPRISE GLOBAL) */}
               {addEntityTab === 'department' && (
                 <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
                   <span className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-blue-600" />
-                    <span>Add Operating Department</span>
+                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                    <span>Add Operating Department (Enterprise Global)</span>
                   </span>
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Select Parent Production Plant *
-                    </label>
-                    <select
-                      value={modalDeptPlantId}
-                      onChange={(e) => setModalDeptPlantId(e.target.value)}
-                      className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 font-medium focus:outline-none focus:border-blue-500 cursor-pointer"
-                    >
-                      {plants.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} ({p.code})
-                        </option>
-                      ))}
-                    </select>
+                  <div className="p-3 bg-emerald-50/90 border border-emerald-200 rounded-xl flex items-start gap-2.5">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    <div className="text-xs text-emerald-950">
+                      <p className="font-bold">Enterprise-Wide Department</p>
+                      <p className="text-[11px] text-emerald-800 mt-0.5 leading-relaxed">
+                        This department will be available across <strong>all Locations and Production Plants</strong>. IT Admin controls user access by assigning this department in User Management.
+                      </p>
+                    </div>
                   </div>
 
                   <div>

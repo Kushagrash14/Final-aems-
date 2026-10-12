@@ -1071,6 +1071,13 @@ function StaffDirectoryContent() {
               Are you sure you want to delete this employee? Any hardware assets currently assigned to them will be automatically unlinked and safely returned to stock.
             </p>
 
+            {notification && notification.type === 'error' && (
+              <div className="flex items-center gap-2 rounded-xl bg-rose-50 border border-rose-200 p-2.5 text-xs text-rose-700">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{notification.message}</span>
+              </div>
+            )}
+
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
               <button
                 type="button"

@@ -3,41 +3,46 @@ import { getDepartments, createDepartment, updateDepartment, deleteDepartment } 
 import { validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit';
 import { getClientIp } from '@/lib/rateLimit';
-import { safeErrorMessage } from '@/lib/apiErrors';
+import { safeErrorMessage, apiErrorStatus } from '@/lib/apiErrors';
 import { filterOrgUnitsForUser, isScopedRole } from '@/lib/permissions';
 
 export async function GET(req: NextRequest) {
-  const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
-  const validation = await validateSessionToken(token);
+  try {
+    const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
+    const validation = await validateSessionToken(token);
 
-  if (!validation.valid || !validation.user) {
-    return NextResponse.json({ error: 'Unauthorized: active login session required' }, { status: 401 });
-  }
-
-  const { searchParams } = new URL(req.url);
-  const plantId = searchParams.get('plantId');
-
-  let departments = await getDepartments();
-
-  if (plantId) {
-    departments = departments.filter((d) => !d.plant_id || d.plant_id === plantId);
-  }
-
-  // Non-IT Admins are strictly scoped to their assigned department(s)
-  const currentUser = validation.user;
-  if (isScopedRole(currentUser)) {
-    departments = filterOrgUnitsForUser(currentUser, validation.scope, 'department', departments);
-  } else if (currentUser.role !== 'it_admin') {
-    if (currentUser.department_id) {
-      departments = departments.filter((d) => d.id === currentUser.department_id);
-    } else if (validation.scope?.department_ids && validation.scope.department_ids.length > 0) {
-      departments = departments.filter((d) => validation.scope!.department_ids!.includes(d.id));
-    } else if (currentUser.plant_id) {
-      departments = departments.filter((d) => !d.plant_id || d.plant_id === currentUser.plant_id);
+    if (!validation.valid || !validation.user) {
+      return NextResponse.json({ error: 'Unauthorized: active login session required' }, { status: 401 });
     }
-  }
 
-  return NextResponse.json({ departments });
+    const { searchParams } = new URL(req.url);
+    const plantId = searchParams.get('plantId');
+
+    let departments = await getDepartments();
+
+    if (plantId) {
+      departments = departments.filter((d) => !d.plant_id || d.plant_id === plantId);
+    }
+
+    // Non-IT Admins are strictly scoped to their assigned department(s)
+    const currentUser = validation.user;
+    if (isScopedRole(currentUser)) {
+      departments = filterOrgUnitsForUser(currentUser, validation.scope, 'department', departments);
+    } else if (currentUser.role !== 'it_admin') {
+      if (currentUser.department_id) {
+        departments = departments.filter((d) => d.id === currentUser.department_id);
+      } else if (validation.scope?.department_ids && validation.scope.department_ids.length > 0) {
+        departments = departments.filter((d) => validation.scope!.department_ids!.includes(d.id));
+      } else if (currentUser.plant_id) {
+        departments = departments.filter((d) => !d.plant_id || d.plant_id === currentUser.plant_id);
+      }
+    }
+
+    return NextResponse.json({ departments });
+  } catch (err: unknown) {
+    const errorMsg = safeErrorMessage(err, 'Failed to fetch departments');
+    return NextResponse.json({ error: errorMsg }, { status: apiErrorStatus(err, 500) });
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -85,7 +90,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, department });
   } catch (err: unknown) {
     const errorMsg = safeErrorMessage(err, 'Failed to create department');
-    return NextResponse.json({ error: errorMsg }, { status: 500 });
+    return NextResponse.json({ error: errorMsg }, { status: apiErrorStatus(err, 400) });
   }
 }
 
@@ -132,7 +137,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ success: true, department: updated });
   } catch (err: unknown) {
     const errorMsg = safeErrorMessage(err, 'Failed to update department');
-    return NextResponse.json({ error: errorMsg }, { status: 500 });
+    return NextResponse.json({ error: errorMsg }, { status: apiErrorStatus(err, 400) });
   }
 }
 
@@ -177,6 +182,6 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ success: true, message: 'Department deleted successfully' });
   } catch (err: unknown) {
     const errorMsg = safeErrorMessage(err, 'Failed to delete department');
-    return NextResponse.json({ error: errorMsg }, { status: 500 });
+    return NextResponse.json({ error: errorMsg }, { status: apiErrorStatus(err, 400) });
   }
 }

@@ -35,10 +35,14 @@ export async function GET(req: NextRequest) {
     users = users.filter((u) => {
       if (u.id === self.id) return true;
       if (!hasAssignment) return false;
-      if (validation.user!.department_id && u.department_id !== validation.user!.department_id) return false;
-      if (validation.user!.plant_id && u.plant_id !== validation.user!.plant_id) return false;
-      if (validation.user!.location_id && u.location_id !== validation.user!.location_id) return false;
-      return true;
+      const theirs = getAssignedOrgUnits(u, u.scope);
+      const inside = (mine: string[] | null, their: string[] | null) =>
+        !mine || (!!their && their.every((id) => mine.includes(id)));
+      return (
+        inside(units.locationIds, theirs.locationIds) &&
+        inside(units.plantIds, theirs.plantIds) &&
+        inside(units.departmentIds, theirs.departmentIds)
+      );
     });
   }
 
@@ -105,6 +109,7 @@ export async function POST(req: NextRequest) {
     let resolvedPltId = plant_id || null;
     let resolvedDeptId = department_id || null;
     const actorIsAdmin = validation.user.role === 'admin';
+    let adminDeptIds: string[] = [];
 
     if (actorIsAdmin) {
       if (role !== 'user') {
@@ -114,12 +119,16 @@ export async function POST(req: NextRequest) {
         );
       }
       resolvedRole = 'user';
-      const scope = validation.scope;
-      const withinAdmin = (own: string | null | undefined, requested: string | null, allowed?: string[] | null) =>
-        own || (requested && (!allowed || allowed.length === 0 || allowed.includes(requested)) ? requested : null);
-      resolvedLocId = withinAdmin(validation.user.location_id, resolvedLocId, scope?.location_ids);
-      resolvedPltId = withinAdmin(validation.user.plant_id, resolvedPltId, scope?.plant_ids);
-      resolvedDeptId = withinAdmin(validation.user.department_id, resolvedDeptId, scope?.department_ids);
+      const units = getAssignedOrgUnits(validation.user, validation.scope);
+      const withinAdmin = (requested: string | null, allowed: string[] | null) =>
+        allowed ? (requested && allowed.includes(requested) ? requested : allowed[0]) : null;
+      resolvedLocId = withinAdmin(resolvedLocId, units.locationIds);
+      resolvedPltId = withinAdmin(resolvedPltId, units.plantIds);
+      resolvedDeptId = withinAdmin(resolvedDeptId, units.departmentIds);
+      adminDeptIds = Array.isArray(department_ids) && units.departmentIds
+        ? department_ids.filter((id: unknown): id is string => typeof id === 'string' && units.departmentIds!.includes(id))
+        : [];
+      if (resolvedDeptId && !adminDeptIds.includes(resolvedDeptId)) adminDeptIds.unshift(resolvedDeptId);
       if (!resolvedLocId || !resolvedPltId || !resolvedDeptId) {
         return NextResponse.json(
           { error: 'Access Denied: users can only be registered inside your own Location, Plant and Department' },
@@ -139,15 +148,15 @@ export async function POST(req: NextRequest) {
         location_id: isItAdmin ? null : resolvedLocId,
         plant_id: isItAdmin ? null : resolvedPltId,
         department_id: isItAdmin ? null : resolvedDeptId,
-        sub_department: isItAdmin ? null : (sub_department && sub_department.toLowerCase() !== 'none' ? sub_department.trim() : null),
+        sub_department: isItAdmin ? null : (sub_department && sub_department.toLowerCase() !== 'none' ? sub_department.trim().slice(0, 255) : null),
       },
       {
         can_edit: isItAdmin ? true : Boolean(can_edit),
         category_ids: isItAdmin ? null : (Array.isArray(category_ids) && category_ids.length > 0 ? category_ids : null),
         location_ids: isItAdmin ? null : (!actorIsAdmin && Array.isArray(location_ids) && location_ids.length > 0 ? location_ids : (resolvedLocId ? [resolvedLocId] : null)),
         plant_ids: isItAdmin ? null : (!actorIsAdmin && Array.isArray(plant_ids) && plant_ids.length > 0 ? plant_ids : (resolvedPltId ? [resolvedPltId] : null)),
-        department_ids: isItAdmin ? null : (!actorIsAdmin && Array.isArray(department_ids) && department_ids.length > 0 ? department_ids : (resolvedDeptId ? [resolvedDeptId] : null)),
-        sub_department: isItAdmin ? null : (sub_department && sub_department.toLowerCase() !== 'none' ? sub_department.trim() : null),
+        department_ids: isItAdmin ? null : actorIsAdmin ? adminDeptIds : (Array.isArray(department_ids) && department_ids.length > 0 ? department_ids : (resolvedDeptId ? [resolvedDeptId] : null)),
+        sub_department: isItAdmin ? null : (sub_department && sub_department.toLowerCase() !== 'none' ? sub_department.trim().slice(0, 255) : null),
       }
     );
 
@@ -246,17 +255,31 @@ export async function PATCH(req: NextRequest) {
 
     // An Admin can only keep the user inside the Admin's own Location / Plant / Department.
     const actorIsAdmin = validation.user.role === 'admin';
+    let adminDeptIds: string[] | null = null;
     if (actorIsAdmin) {
-      body.location_id = validation.user.location_id || target.location_id || null;
-      body.plant_id = validation.user.plant_id || target.plant_id || null;
-      body.department_id = validation.user.department_id || target.department_id || null;
+      const units = getAssignedOrgUnits(validation.user, validation.scope);
+      const withinAdmin = (requested: string | null | undefined, fallback: string | null | undefined, allowed: string[] | null) => {
+        if (!allowed) return fallback || null;
+        if (requested && allowed.includes(requested)) return requested;
+        if (fallback && allowed.includes(fallback)) return fallback;
+        return allowed[0];
+      };
+      body.location_id = withinAdmin(location_id, target.location_id, units.locationIds);
+      body.plant_id = withinAdmin(plant_id, target.plant_id, units.plantIds);
+      body.department_id = withinAdmin(department_id, target.department_id, units.departmentIds);
+      if (units.departmentIds) {
+        adminDeptIds = Array.isArray(department_ids)
+          ? department_ids.filter((id: unknown): id is string => typeof id === 'string' && units.departmentIds!.includes(id))
+          : [];
+        if (body.department_id && !adminDeptIds.includes(body.department_id)) adminDeptIds.unshift(body.department_id);
+      }
     }
     const effLocationId = actorIsAdmin ? body.location_id : location_id;
     const effPlantId = actorIsAdmin ? body.plant_id : plant_id;
     const effDepartmentId = actorIsAdmin ? body.department_id : department_id;
     const effLocationIds = actorIsAdmin ? null : location_ids;
     const effPlantIds = actorIsAdmin ? null : plant_ids;
-    const effDepartmentIds = actorIsAdmin ? null : department_ids;
+    const effDepartmentIds = actorIsAdmin ? adminDeptIds : department_ids;
 
     // User profile updates
     const isItAdmin = (targetRole ?? target.role) === 'it_admin';
@@ -276,7 +299,7 @@ export async function PATCH(req: NextRequest) {
       if (effPlantId !== undefined) userUpdates.plant_id = effPlantId || null;
       if (effDepartmentId !== undefined) userUpdates.department_id = effDepartmentId || null;
       if (sub_department !== undefined) {
-        userUpdates.sub_department = sub_department && sub_department.toLowerCase() !== 'none' ? sub_department.trim() : null;
+        userUpdates.sub_department = sub_department && sub_department.toLowerCase() !== 'none' ? sub_department.trim().slice(0, 255) : null;
       }
     }
 
@@ -295,7 +318,7 @@ export async function PATCH(req: NextRequest) {
       location_ids: resolvedLocationIds,
       plant_ids: resolvedPlantIds,
       department_ids: resolvedDeptIds,
-      sub_department: isItAdmin ? null : (sub_department && sub_department.toLowerCase() !== 'none' ? sub_department.trim() : null),
+      sub_department: isItAdmin ? null : (sub_department && sub_department.toLowerCase() !== 'none' ? sub_department.trim().slice(0, 255) : null),
     });
     invalidateSessionValidationCache();
 

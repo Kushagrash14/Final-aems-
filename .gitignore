@@ -44,6 +44,9 @@ next-env.d.ts
 /scratch/
 /supabase/
 
+# Supabase migration reports
+/migration-report-*.json
+
 # demo mode local data
 /.aems-demo-data.json
 /.aems-demo-data.json.tmp

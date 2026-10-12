@@ -30,6 +30,16 @@ export async function POST(req: NextRequest) {
     const plants = await getPlants();
     const departments = await getDepartments();
 
+    if (categories.length === 0 || locations.length === 0 || plants.length === 0 || departments.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            'Master setup incomplete: Please ensure at least one Location, Plant, Department, and Category exist in Settings before importing.',
+        },
+        { status: 400 }
+      );
+    }
+
     const results = {
       imported: 0,
       errors: [] as Array<{ row: number; error: string }>,

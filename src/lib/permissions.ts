@@ -28,14 +28,15 @@ export function isScopedRole(user: Pick<User, 'role'> | null | undefined): boole
 
 /**
  * The Location / Plant / Department ids an account is assigned to (null = not restricted at that level).
- * The direct assignment on the user wins; otherwise the scope lists are used.
+ * The scope lists hold every assigned unit (an account may cover several departments); the direct
+ * assignment on the user is used when no list is stored.
  */
 export function getAssignedOrgUnits(
   user: Pick<User, 'location_id' | 'plant_id' | 'department_id'>,
   scope: UserScope | null | undefined
 ): { locationIds: string[] | null; plantIds: string[] | null; departmentIds: string[] | null } {
   const pick = (own: string | null | undefined, list: string[] | null | undefined) =>
-    own ? [own] : list && list.length > 0 ? list : null;
+    list && list.length > 0 ? list : own ? [own] : null;
   return {
     locationIds: pick(user.location_id, scope?.location_ids),
     plantIds: pick(user.plant_id, scope?.plant_ids),
@@ -102,17 +103,17 @@ export function isEntityInUserScope(
     if (units.locationIds && (!locId || !units.locationIds.includes(locId))) return false;
     if (units.plantIds && (!pltId || !units.plantIds.includes(pltId))) return false;
     if (units.departmentIds && (!deptId || !units.departmentIds.includes(deptId))) return false;
-  }
-
-  // Check direct user location_id, plant_id, department_id
-  if (user.location_id && locId && user.location_id !== locId) {
-    return false;
-  }
-  if (user.plant_id && pltId && user.plant_id !== pltId) {
-    return false;
-  }
-  if (user.department_id && deptId && user.department_id !== deptId) {
-    return false;
+  } else {
+    // Check direct user location_id, plant_id, department_id
+    if (user.location_id && locId && user.location_id !== locId) {
+      return false;
+    }
+    if (user.plant_id && pltId && user.plant_id !== pltId) {
+      return false;
+    }
+    if (user.department_id && deptId && user.department_id !== deptId) {
+      return false;
+    }
   }
 
   // Check UserScope arrays if assigned

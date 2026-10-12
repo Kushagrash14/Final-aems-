@@ -1061,30 +1061,29 @@ export async function updateEmployee(id: string, updates: Partial<Employee>): Pr
 export async function deleteEmployee(id: string): Promise<boolean> {
   const held = await getAssetsHeldByEmployee(id);
   if (held.length > 0) {
-    throw new Error(
-      `This employee still holds ${describeHeldAssets(held)}. Return these assets to stock or reassign them before deleting the employee.`
-    );
+    if (env.isMockMode) {
+      memory.assets.forEach((a) => {
+        if (a.assigned_employee_id === id) {
+          a.assigned_employee_id = null;
+          a.status = 'in_storage';
+        }
+      });
+    } else {
+      await db.from('assets').update({ assigned_employee_id: null, status: 'in_storage' }).eq('assigned_employee_id', id);
+    }
   }
-
-  const historyError =
-    'This employee has asset custody history. Mark the employee as resigned instead of deleting, so the asset history stays intact.';
 
   if (env.isMockMode) {
     const idx = memory.employees.findIndex((e) => e.id === id);
     if (idx === -1) return false;
-    if (mockAssignments().some((a) => a.employee_id === id)) throw new Error(historyError);
+    memory.assetAssignments = (memory.assetAssignments || []).filter((a) => a.employee_id !== id);
     memory.employees.splice(idx, 1);
+    invalidateMasterDataCache();
     return true;
   }
 
-  const { count: historyCount, error: historyLookupError } = await db
-    .from('asset_assignments')
-    .select('id', { count: 'exact', head: true })
-    .eq('employee_id', id);
-  if (historyLookupError) throw new Error(`Failed to check employee asset history: ${historyLookupError.message}`);
-  if ((historyCount || 0) > 0) throw new Error(historyError);
-
   try { await db.from('pm_complaints').delete().eq('reported_by_employee_id', id); } catch {}
+  try { await db.from('asset_assignments').delete().eq('employee_id', id); } catch {}
 
   const { error } = await db.from('employees').delete().eq('id', id);
   if (error) throw new Error(error.message);

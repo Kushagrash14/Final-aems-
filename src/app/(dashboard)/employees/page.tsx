@@ -1444,6 +1444,13 @@ function EmployeesPageContent() {
               <span className="font-mono">{deletingEmpTarget.emp_code}</span>)?
             </p>
 
+            {error && (
+              <div className="flex items-center gap-2 rounded-xl bg-rose-50 border border-rose-200 p-2.5 text-xs text-rose-700">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{error}</span>
+              </div>
+            )}
+
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
               <button
                 type="button"

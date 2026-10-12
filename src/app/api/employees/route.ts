@@ -4,37 +4,58 @@ import { validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { canUserEdit, getAssignedOrgUnits, isScopedRole } from '@/lib/permissions';
 import { logAuditEvent } from '@/lib/audit';
 import { getClientIp } from '@/lib/rateLimit';
-import { safeErrorMessage } from '@/lib/apiErrors';
+import { safeErrorMessage, apiErrorStatus } from '@/lib/apiErrors';
 
 export async function GET(req: NextRequest) {
-  const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
-  const validation = await validateSessionToken(token);
+  try {
+    const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
+    const validation = await validateSessionToken(token);
 
-  if (!validation.valid || !validation.user) {
-    return NextResponse.json({ error: 'Unauthorized: active login session required' }, { status: 401 });
-  }
+    if (!validation.valid || !validation.user) {
+      return NextResponse.json({ error: 'Unauthorized: active login session required' }, { status: 401 });
+    }
 
-  const { searchParams } = new URL(req.url);
-  let locationId = searchParams.get('locationId') || searchParams.get('location_id') || undefined;
-  let plantId = searchParams.get('plantId') || searchParams.get('plant_id') || undefined;
-  let deptId = searchParams.get('deptId') || searchParams.get('department_id') || undefined;
-  const search = searchParams.get('search') || undefined;
+    const { searchParams } = new URL(req.url);
+    let locationId = searchParams.get('locationId') || searchParams.get('location_id') || undefined;
+    let plantId = searchParams.get('plantId') || searchParams.get('plant_id') || undefined;
+    let deptId = searchParams.get('deptId') || searchParams.get('department_id') || undefined;
+    const search = searchParams.get('search') || undefined;
 
-  // Enforce facility & department scoping for non-IT Admin
-  if (validation.user.role !== 'it_admin') {
+    // Enforce facility & department scoping for non-IT Admin
     if (isScopedRole(validation.user)) {
       const units = getAssignedOrgUnits(validation.user, validation.scope);
       if (!units.locationIds && !units.plantIds && !units.departmentIds) {
         return NextResponse.json({ employees: [] });
       }
+      const narrow = (requested: string | undefined, allowed: string[] | null) =>
+        allowed && requested && !allowed.includes(requested) ? null : requested;
+      const loc = narrow(locationId, units.locationIds);
+      const plt = narrow(plantId, units.plantIds);
+      const dept = narrow(deptId, units.departmentIds);
+      if (loc === null || plt === null || dept === null) {
+        return NextResponse.json({ employees: [] });
+      }
+      const all = await getEmployees({ locationId: loc, plantId: plt, deptId: dept, search });
+      const employees = all.filter((e) =>
+        (!units.locationIds || (e.location_id && units.locationIds.includes(e.location_id))) &&
+        (!units.plantIds || (e.plant_id && units.plantIds.includes(e.plant_id))) &&
+        (!units.departmentIds || (e.department_id && units.departmentIds.includes(e.department_id)))
+      );
+      return NextResponse.json({ employees });
     }
-    if (validation.user.location_id) locationId = validation.user.location_id;
-    if (validation.user.plant_id) plantId = validation.user.plant_id;
-    if (validation.user.department_id) deptId = validation.user.department_id;
-  }
 
-  const employees = await getEmployees({ locationId, plantId, deptId, search });
-  return NextResponse.json({ employees });
+    if (validation.user.role !== 'it_admin') {
+      if (validation.user.location_id) locationId = validation.user.location_id;
+      if (validation.user.plant_id) plantId = validation.user.plant_id;
+      if (validation.user.department_id) deptId = validation.user.department_id;
+    }
+
+    const employees = await getEmployees({ locationId, plantId, deptId, search });
+    return NextResponse.json({ employees });
+  } catch (err: unknown) {
+    const errorMsg = safeErrorMessage(err, 'Failed to fetch employees');
+    return NextResponse.json({ error: errorMsg }, { status: apiErrorStatus(err, 500) });
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -148,7 +169,7 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ success: true, employee: updated });
   } catch (err: unknown) {
     const errorMsg = safeErrorMessage(err, 'Failed to update employee');
-    return NextResponse.json({ error: errorMsg }, { status: 500 });
+    return NextResponse.json({ error: errorMsg }, { status: apiErrorStatus(err, 400) });
   }
 }
 
@@ -196,6 +217,6 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ success: true, message: 'Employee deleted successfully' });
   } catch (err: unknown) {
     const errorMsg = safeErrorMessage(err, 'Failed to delete employee');
-    return NextResponse.json({ error: errorMsg }, { status: 500 });
+    return NextResponse.json({ error: errorMsg }, { status: apiErrorStatus(err, 400) });
   }
 }

@@ -375,11 +375,11 @@ function AssetWizardContent() {
   // Scoped departments available to the current user
   const availableDepartments = useMemo(() => {
     if (!currentUser || currentUser.role === 'it_admin') return departments;
-    if (currentUser.department_id) {
-      return departments.filter((d) => d.id === currentUser.department_id);
-    }
     if (currentUser.scope?.department_ids && currentUser.scope.department_ids.length > 0) {
       return departments.filter((d) => currentUser.scope!.department_ids!.includes(d.id));
+    }
+    if (currentUser.department_id) {
+      return departments.filter((d) => d.id === currentUser.department_id);
     }
     if (currentUser.plant_id) {
       return departments.filter((d) => !d.plant_id || d.plant_id === currentUser.plant_id);
@@ -392,12 +392,8 @@ function AssetWizardContent() {
     if (!currentUser) return false;
     // IT Admin has cross-department access
     if (currentUser.role === 'it_admin') return false;
-    // Facility Admins and Users are locked to their assigned department
-    return Boolean(
-      currentUser.department_id ||
-      (currentUser.scope?.department_ids && currentUser.scope.department_ids.length <= 1) ||
-      availableDepartments.length <= 1
-    );
+    // Facility Admins and Users are locked unless they are assigned several departments
+    return availableDepartments.length <= 1;
   }, [currentUser, availableDepartments]);
 
 

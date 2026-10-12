@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAssets, getAssetById, createAsset, resolveCategoryIdByName, inferItCategoryName } from '@/lib/store';
 import { validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
-import { canUserEdit, isEntityInUserScope } from '@/lib/permissions';
+import { canUserEdit, getAssignedOrgUnits, isEntityInUserScope, isScopedRole } from '@/lib/permissions';
 import { logAuditEvent } from '@/lib/audit';
 import { approvalForAudit, findSameTypeConflict, parseDuplicateApproval, parseHod, type DuplicateApproval } from '@/lib/assetRules';
 import { sendInHouseHodEmail } from '@/lib/mailer';
@@ -89,7 +89,14 @@ export async function POST(req: NextRequest) {
     }
 
     // For Facility Admin or User, enforce their assigned location, plant, and department
-    if (validation.user.role !== 'it_admin') {
+    if (isScopedRole(validation.user)) {
+      const units = getAssignedOrgUnits(validation.user, validation.scope);
+      const keepAssigned = (requested: string | null | undefined, allowed: string[] | null) =>
+        allowed ? (requested && allowed.includes(requested) ? requested : allowed[0]) : requested;
+      asset.current_location_id = keepAssigned(asset.current_location_id, units.locationIds);
+      asset.current_plant_id = keepAssigned(asset.current_plant_id, units.plantIds);
+      asset.current_department_id = keepAssigned(asset.current_department_id, units.departmentIds);
+    } else if (validation.user.role !== 'it_admin') {
       if (validation.user.location_id) asset.current_location_id = validation.user.location_id;
       if (validation.user.plant_id) asset.current_plant_id = validation.user.plant_id;
       if (validation.user.department_id) asset.current_department_id = validation.user.department_id;

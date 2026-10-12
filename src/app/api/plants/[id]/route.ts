@@ -3,7 +3,7 @@ import { updatePlant, deletePlant } from '@/lib/store';
 import { validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { logAuditEvent } from '@/lib/audit';
 import { getClientIp } from '@/lib/rateLimit';
-import { safeErrorMessage } from '@/lib/apiErrors';
+import { safeErrorMessage, apiErrorStatus } from '@/lib/apiErrors';
 
 export async function PATCH(
   req: NextRequest,
@@ -58,7 +58,7 @@ export async function PATCH(
     return NextResponse.json({ success: true, plant: updated });
   } catch (err: unknown) {
     const msg = safeErrorMessage(err, 'Failed to update plant');
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json({ error: msg }, { status: apiErrorStatus(err, 400) });
   }
 }
 
@@ -101,6 +101,6 @@ export async function DELETE(
     return NextResponse.json({ success: true, message: 'Plant deleted successfully' });
   } catch (err: unknown) {
     const msg = safeErrorMessage(err, 'Failed to delete plant');
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json({ error: msg }, { status: apiErrorStatus(err, 400) });
   }
 }

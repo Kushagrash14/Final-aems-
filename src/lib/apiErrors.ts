@@ -15,3 +15,12 @@ export function safeErrorMessage(err: unknown, fallback: string): string {
   }
   return message;
 }
+
+export function isBusinessError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : '';
+  return Boolean(message && message.length <= 300 && !INTERNAL_ERROR_PATTERN.test(message));
+}
+
+export function apiErrorStatus(err: unknown, clientStatus = 400): number {
+  return isBusinessError(err) ? clientStatus : 500;
+}

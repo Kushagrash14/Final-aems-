@@ -4,7 +4,7 @@ import { validateSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 import { canUserEdit } from '@/lib/permissions';
 import { logAuditEvent } from '@/lib/audit';
 import { getClientIp } from '@/lib/rateLimit';
-import { safeErrorMessage } from '@/lib/apiErrors';
+import { safeErrorMessage, apiErrorStatus } from '@/lib/apiErrors';
 
 function requestMeta(req: NextRequest) {
   return {
@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, category: cat });
   } catch (err: unknown) {
     const errorMsg = safeErrorMessage(err, 'Failed to create category');
-    return NextResponse.json({ error: errorMsg }, { status: 500 });
+    return NextResponse.json({ error: errorMsg }, { status: apiErrorStatus(err, 400) });
   }
 }
 
@@ -118,7 +118,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ success: true, category: updated });
   } catch (err: unknown) {
     const errorMsg = safeErrorMessage(err, 'Failed to update category');
-    return NextResponse.json({ error: errorMsg }, { status: 500 });
+    return NextResponse.json({ error: errorMsg }, { status: apiErrorStatus(err, 400) });
   }
 }
 
@@ -160,6 +160,6 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ success: true });
   } catch (err: unknown) {
     const errorMsg = safeErrorMessage(err, 'Failed to delete category');
-    return NextResponse.json({ error: errorMsg }, { status: 500 });
+    return NextResponse.json({ error: errorMsg }, { status: apiErrorStatus(err, 400) });
   }
 }
