@@ -152,6 +152,7 @@ function SettingsContent() {
   const [userRole, setUserRole] = useState<'it_admin' | 'admin' | 'hr' | 'user'>('user');
   const [userLocationId, setUserLocationId] = useState('');
   const [userPlantId, setUserPlantId] = useState('');
+  const [userPlantIds, setUserPlantIds] = useState<string[]>([]);
   const [userDeptIds, setUserDeptIds] = useState<string[]>([]);
   const [userSubDepts, setUserSubDepts] = useState<string[]>([]);
   const [userCanEdit, setUserCanEdit] = useState(true);
@@ -162,6 +163,16 @@ function SettingsContent() {
     if (!userLocationId) return plants;
     return plants.filter((p) => p.location_id === userLocationId);
   }, [plants, userLocationId]);
+
+  const plantOptionsForUser = useMemo(() => {
+    return availablePlantsForUser.map((p) => {
+      const loc = locations.find((l) => l.id === p.location_id)?.name;
+      return {
+        value: p.id,
+        label: `${p.name} (${p.code})${loc ? ` • ${loc}` : ''}`,
+      };
+    });
+  }, [availablePlantsForUser, locations]);
 
   const deptOptionsForUser = useMemo(
     () =>
@@ -174,14 +185,17 @@ function SettingsContent() {
 
   const subDeptOptionsForUser = useMemo(() => {
     const names = new Set<string>();
-    plants.find((p) => p.id === userPlantId)?.sub_departments?.forEach((s) => s && names.add(s.trim()));
+    const activePltIds = userPlantIds.length > 0 ? userPlantIds : (userPlantId ? [userPlantId] : []);
+    plants
+      .filter((p) => activePltIds.includes(p.id))
+      .forEach((p) => p.sub_departments?.forEach((s) => s && names.add(s.trim())));
     departments
       .filter((d) => userDeptIds.includes(d.id) && d.sub_department)
       .forEach((d) => names.add(d.sub_department!.trim()));
     return Array.from(names)
       .filter((s) => s && s.toLowerCase() !== 'none')
       .map((s) => ({ value: s, label: s }));
-  }, [plants, departments, userPlantId, userDeptIds]);
+  }, [plants, departments, userPlantId, userPlantIds, userDeptIds]);
 
   const parseSubDepts = (value?: string | null) =>
     (value || '')
@@ -200,6 +214,7 @@ function SettingsContent() {
     setUserRole(isFacilityAdmin ? 'user' : isPrimaryAdmin ? 'it_admin' : 'admin');
     setUserLocationId(isFacilityAdmin ? (currentUser?.location_id || '') : '');
     setUserPlantId(isFacilityAdmin ? (currentUser?.plant_id || '') : '');
+    setUserPlantIds(isFacilityAdmin ? (currentUser?.plant_id ? [currentUser.plant_id] : []) : []);
     setUserDeptIds(isFacilityAdmin ? assignedDeptIdsOf(currentUser).slice(0, 1) : []);
     setUserSubDepts(isFacilityAdmin ? parseSubDepts(currentUser?.sub_department) : []);
     setUserCanEdit(true);
@@ -216,6 +231,10 @@ function SettingsContent() {
     setUserRole(u.role);
     setUserLocationId(u.location_id || u.scope?.location_ids?.[0] || '');
     setUserPlantId(u.plant_id || u.scope?.plant_ids?.[0] || '');
+    const initialPlantIds = (u.scope?.plant_ids && u.scope.plant_ids.length > 0)
+      ? u.scope.plant_ids
+      : (u.plant_id ? [u.plant_id] : []);
+    setUserPlantIds(initialPlantIds);
     setUserDeptIds(assignedDeptIdsOf(u));
     setUserSubDepts(parseSubDepts(u.sub_department || u.scope?.sub_department));
     setUserCanEdit(u.scope?.can_edit ?? true);
@@ -231,8 +250,31 @@ function SettingsContent() {
 
     const resolvedRole = isFacilityAdmin ? 'user' : userRole;
     const isItAdmin = resolvedRole === 'it_admin';
-    const resolvedLoc = isFacilityAdmin ? (currentUser?.location_id || userLocationId || null) : (isItAdmin ? null : (userLocationId || null));
-    const resolvedPlt = isFacilityAdmin ? (currentUser?.plant_id || userPlantId || null) : (isItAdmin ? null : (userPlantId || null));
+    const resolvedPltIds = isFacilityAdmin
+      ? (currentUser?.plant_id ? [currentUser.plant_id] : (userPlantIds.length > 0 ? userPlantIds : (userPlantId ? [userPlantId] : [])))
+      : (isItAdmin ? [] : (userPlantIds.length > 0 ? userPlantIds : (userPlantId ? [userPlantId] : [])));
+    const resolvedPlt = resolvedPltIds[0] || null;
+
+    const derivedLocIds = Array.from(
+      new Set(
+        plants
+          .filter((p) => resolvedPltIds.includes(p.id))
+          .map((p) => p.location_id)
+          .filter((lid): lid is string => Boolean(lid))
+      )
+    );
+    const resolvedLoc = isFacilityAdmin
+      ? (currentUser?.location_id || userLocationId || derivedLocIds[0] || null)
+      : (isItAdmin ? null : (userLocationId || derivedLocIds[0] || null));
+    const resolvedLocIds = isItAdmin
+      ? null
+      : (derivedLocIds.length > 0 ? derivedLocIds : (resolvedLoc ? [resolvedLoc] : null));
+
+    if (!isItAdmin && resolvedPltIds.length === 0 && !resolvedLoc) {
+      setUserModalError('Please select at least one Production Plant');
+      return;
+    }
+
     const resolvedDeptIds = isItAdmin ? [] : userDeptIds.length > 0 ? userDeptIds : isFacilityAdmin ? assignedDeptIdsOf(currentUser).slice(0, 1) : [];
     const resolvedDept = resolvedDeptIds[0] || null;
     if (!isItAdmin && !resolvedDept) {
@@ -257,8 +299,8 @@ function SettingsContent() {
           department_id: resolvedDept,
           sub_department: isItAdmin ? null : (userSubDepts.join(', ') || 'None'),
           can_edit: isItAdmin ? true : userCanEdit,
-          location_ids: isItAdmin ? null : (resolvedLoc ? [resolvedLoc] : null),
-          plant_ids: isItAdmin ? null : (resolvedPlt ? [resolvedPlt] : null),
+          location_ids: resolvedLocIds,
+          plant_ids: isItAdmin ? null : (resolvedPltIds.length > 0 ? resolvedPltIds : null),
           department_ids: isItAdmin ? null : resolvedDeptIds,
         }),
       });
@@ -291,8 +333,26 @@ function SettingsContent() {
 
     const resolvedRole = isFacilityAdmin ? 'user' : userRole;
     const isItAdmin = resolvedRole === 'it_admin';
-    const resolvedLoc = isFacilityAdmin ? (currentUser?.location_id || userLocationId || null) : (isItAdmin ? null : (userLocationId || null));
-    const resolvedPlt = isFacilityAdmin ? (currentUser?.plant_id || userPlantId || null) : (isItAdmin ? null : (userPlantId || null));
+    const resolvedPltIds = isFacilityAdmin
+      ? (currentUser?.plant_id ? [currentUser.plant_id] : (userPlantIds.length > 0 ? userPlantIds : (userPlantId ? [userPlantId] : [])))
+      : (isItAdmin ? [] : (userPlantIds.length > 0 ? userPlantIds : (userPlantId ? [userPlantId] : [])));
+    const resolvedPlt = resolvedPltIds[0] || null;
+
+    const derivedLocIds = Array.from(
+      new Set(
+        plants
+          .filter((p) => resolvedPltIds.includes(p.id))
+          .map((p) => p.location_id)
+          .filter((lid): lid is string => Boolean(lid))
+      )
+    );
+    const resolvedLoc = isFacilityAdmin
+      ? (currentUser?.location_id || userLocationId || derivedLocIds[0] || null)
+      : (isItAdmin ? null : (userLocationId || derivedLocIds[0] || null));
+    const resolvedLocIds = isItAdmin
+      ? null
+      : (derivedLocIds.length > 0 ? derivedLocIds : (resolvedLoc ? [resolvedLoc] : null));
+
     const resolvedDeptIds = isItAdmin ? [] : userDeptIds;
     const resolvedDept = resolvedDeptIds[0] || null;
 
@@ -314,8 +374,8 @@ function SettingsContent() {
           department_id: resolvedDept,
           sub_department: isItAdmin ? null : (userSubDepts.join(', ') || 'None'),
           can_edit: isItAdmin ? true : userCanEdit,
-          location_ids: isItAdmin ? null : (resolvedLoc ? [resolvedLoc] : null),
-          plant_ids: isItAdmin ? null : (resolvedPlt ? [resolvedPlt] : null),
+          location_ids: resolvedLocIds,
+          plant_ids: isItAdmin ? null : (resolvedPltIds.length > 0 ? resolvedPltIds : null),
           department_ids: isItAdmin ? null : (resolvedDeptIds.length > 0 ? resolvedDeptIds : null),
         }),
       });
@@ -1402,10 +1462,32 @@ function SettingsContent() {
                             ) : (
                               <>
                                 <div className="font-semibold text-slate-800">
-                                  {userLoc?.name || (u.scope?.location_ids?.length ? `${u.scope.location_ids.length} Location(s)` : 'All Locations')}
+                                  {(() => {
+                                    if (u.scope?.location_ids && u.scope.location_ids.length > 0) {
+                                      const locNames = u.scope.location_ids
+                                        .map((id) => locations.find((l) => l.id === id)?.name)
+                                        .filter(Boolean);
+                                      if (locNames.length > 0) return locNames.join(', ');
+                                    }
+                                    return userLoc?.name || 'All Locations';
+                                  })()}
                                 </div>
-                                <div className="text-[11px] text-slate-400">
-                                  {userPlt?.name || 'All Plants'}
+                                <div className="text-[11px] text-slate-500 font-medium mt-0.5">
+                                  {(() => {
+                                    if (u.scope?.plant_ids && u.scope.plant_ids.length > 0) {
+                                      const pltNames = u.scope.plant_ids
+                                        .map((id) => plants.find((p) => p.id === id)?.name)
+                                        .filter(Boolean);
+                                      if (pltNames.length > 0) {
+                                        return (
+                                          <span className="inline-flex items-center gap-1 text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded font-semibold border border-blue-100 text-[10px]">
+                                            {pltNames.join(', ')}
+                                          </span>
+                                        );
+                                      }
+                                    }
+                                    return userPlt?.name || 'All Plants';
+                                  })()}
                                 </div>
                               </>
                             )}
@@ -2381,9 +2463,9 @@ function SettingsContent() {
       {/* POPUP MODAL 1: REGISTER NEW USER (IT ADMIN STRICT)                        */}
       {/* ========================================================================= */}
       {showAddUserModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white rounded-none sm:rounded-2xl border-0 sm:border border-slate-200 shadow-2xl max-w-lg w-full h-full sm:h-auto max-h-[100dvh] sm:max-h-[90vh] flex flex-col p-4 sm:p-6 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
               <div className="flex items-center gap-2">
                 <ShieldCheck className="w-5 h-5 text-blue-600" />
                 <div>
@@ -2401,253 +2483,253 @@ function SettingsContent() {
             </div>
 
             {userModalError && (
-              <div className="flex items-center gap-2 p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700">
+              <div className="flex items-center gap-2 p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 shrink-0 mt-2">
                 <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
                 <span className="font-semibold">{userModalError}</span>
               </div>
             )}
 
-            <form onSubmit={handleRegisterUser} className="space-y-3.5">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Employee ID *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={userEmpCode}
-                    onChange={(e) => setUserEmpCode(e.target.value)}
-                    placeholder="e.g. PG-1049"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Full Name *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={userName}
-                    onChange={(e) => setUserName(e.target.value)}
-                    placeholder="e.g. Rahul Sharma"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Mail ID *
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    value={userEmail}
-                    onChange={(e) => setUserEmail(e.target.value)}
-                    placeholder="e.g. user@pgel.in"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Assigned Role *
-                  </label>
-                  {isFacilityAdmin ? (
-                    <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between">
-                      <div className="flex items-center gap-1.5 font-bold text-xs text-blue-700">
-                        <ShieldCheck className="w-3.5 h-3.5 shrink-0 text-blue-600" />
-                        <span>USER</span>
-                      </div>
-                      <span className="text-[9px] bg-blue-600 text-white font-extrabold px-1.5 py-0.5 rounded uppercase">Locked</span>
-                    </div>
-                  ) : (
-                    <select
-                      value={userRole}
-                      onChange={(e) => {
-                        const newRole = e.target.value as any;
-                        setUserRole(newRole);
-                        if (newRole === 'it_admin') {
-                          setUserLocationId('');
-                          setUserPlantId('');
-                          setUserDeptIds([]);
-                          setUserSubDepts([]);
-                          setUserCanEdit(true);
-                        }
-                      }}
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 font-semibold focus:outline-none focus:border-blue-500 cursor-pointer"
-                    >
-                      {(isPrimaryAdmin || userRole === 'it_admin') && <option value="it_admin">IT ADMIN</option>}
-                      <option value="admin">ADMIN</option>
-                      <option value="user">USER</option>
-                    </select>
-                  )}
-                </div>
-              </div>
-
-              {isFacilityAdmin ? (
-                <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-blue-800 uppercase tracking-wider flex items-center gap-1.5">
-                      <Building className="w-3.5 h-3.5 text-blue-600" />
-                      <span>Assigned Facility &amp; Department Scope</span>
-                    </span>
-                    <span className="text-[9px] bg-blue-600 text-white font-bold px-1.5 py-0.5 rounded uppercase">Your Facility</span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="bg-white p-2 rounded-lg border border-blue-100">
-                      <span className="text-[10px] text-slate-400 block font-semibold">Location</span>
-                      <span className="font-bold text-slate-800 truncate block">
-                        {locations.find((l) => l.id === userLocationId)?.name || 'Facility Location'}
-                      </span>
-                    </div>
-                    <div className="bg-white p-2 rounded-lg border border-blue-100">
-                      <span className="text-[10px] text-slate-400 block font-semibold">Plant</span>
-                      <span className="font-bold text-slate-800 truncate block">
-                        {plants.find((p) => p.id === userPlantId)?.name || 'Production Plant'}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                        Department(s) *
-                      </label>
-                      <ScopeMultiSelect
-                        options={deptOptionsForUser}
-                        selected={userDeptIds}
-                        onChange={setUserDeptIds}
-                        placeholder="-- Select Department(s) --"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                        Sub Department(s) (Optional)
-                      </label>
-                      <ScopeMultiSelect
-                        options={subDeptOptionsForUser}
-                        selected={userSubDepts}
-                        onChange={setUserSubDepts}
-                        placeholder="None"
-                        allowCustom
-                        customPlaceholder="e.g. Line 1"
-                      />
-                    </div>
-                  </div>
-                </div>
-              ) : userRole === 'it_admin' ? (
-                <div className="p-3.5 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200/80 rounded-xl flex items-start gap-3">
-                  <div className="p-2 bg-blue-600 rounded-lg text-white shadow-xs shrink-0 mt-0.5">
-                    <ShieldCheck className="w-5 h-5" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <h4 className="text-xs font-black text-blue-950 uppercase tracking-wider">
-                        Automatic Global Access (Enterprise-Wide)
-                      </h4>
-                      <span className="text-[9px] bg-blue-600 text-white font-extrabold px-1.5 py-0.2 rounded uppercase">
-                        Unrestricted
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-blue-800 leading-relaxed mt-1 font-medium">
-                      <strong>IT Admin</strong> automatically has full unrestricted access to <strong>all Locations, all Production Plants, and all Departments</strong> across PG Electroplast. Specific Location, Plant, or Department assignment is not required.
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Location *
-                      </label>
-                      <select
-                        required
-                        value={userLocationId}
-                        onChange={(e) => {
-                          setUserLocationId(e.target.value);
-                          setUserPlantId('');
-                        }}
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500 cursor-pointer"
-                      >
-                        <option value="">-- Select Location --</option>
-                        {locations.map((loc) => (
-                          <option key={loc.id} value={loc.id}>
-                            {loc.name} ({loc.code})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Production Plant *
-                      </label>
-                      <select
-                        required
-                        value={userPlantId}
-                        onChange={(e) => setUserPlantId(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500 cursor-pointer"
-                      >
-                        <option value="">-- Select Plant --</option>
-                        {availablePlantsForUser.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name} ({p.code})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Department(s) *
-                      </label>
-                      <ScopeMultiSelect
-                        options={deptOptionsForUser}
-                        selected={userDeptIds}
-                        onChange={setUserDeptIds}
-                        placeholder="-- Select Department(s) --"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Sub Department(s) (or &quot;None&quot;)
-                      </label>
-                      <ScopeMultiSelect
-                        options={subDeptOptionsForUser}
-                        selected={userSubDepts}
-                        onChange={setUserSubDepts}
-                        placeholder="None"
-                        allowCustom
-                        customPlaceholder="e.g. Line 3"
-                      />
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {userRole !== 'it_admin' && (
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-                  <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+            <form onSubmit={handleRegisterUser} className="flex-1 min-h-0 flex flex-col justify-between mt-2">
+              <div className="flex-1 overflow-y-auto space-y-3.5 pr-1 -mr-1 py-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Employee ID *
+                    </label>
                     <input
-                      type="checkbox"
-                      checked={userCanEdit}
-                      onChange={(e) => setUserCanEdit(e.target.checked)}
-                      className="h-4 w-4 rounded text-blue-600 focus:ring-0 cursor-pointer"
+                      type="text"
+                      required
+                      value={userEmpCode}
+                      onChange={(e) => setUserEmpCode(e.target.value)}
+                      placeholder="e.g. PG-1049"
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white"
                     />
-                    <span>Permission Mode: Full Edit Access Allowed</span>
-                  </label>
-                </div>
-              )}
+                  </div>
 
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Full Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={userName}
+                      onChange={(e) => setUserName(e.target.value)}
+                      placeholder="e.g. Rahul Sharma"
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Mail ID *
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={userEmail}
+                      onChange={(e) => setUserEmail(e.target.value)}
+                      placeholder="e.g. user@pgel.in"
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Assigned Role *
+                    </label>
+                    {isFacilityAdmin ? (
+                      <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 font-bold text-xs text-blue-700">
+                          <ShieldCheck className="w-3.5 h-3.5 shrink-0 text-blue-600" />
+                          <span>USER</span>
+                        </div>
+                        <span className="text-[9px] bg-blue-600 text-white font-extrabold px-1.5 py-0.5 rounded uppercase">Locked</span>
+                      </div>
+                    ) : (
+                      <select
+                        value={userRole}
+                        onChange={(e) => {
+                          const newRole = e.target.value as any;
+                          setUserRole(newRole);
+                          if (newRole === 'it_admin') {
+                            setUserLocationId('');
+                            setUserPlantId('');
+                            setUserPlantIds([]);
+                            setUserDeptIds([]);
+                            setUserSubDepts([]);
+                            setUserCanEdit(true);
+                          }
+                        }}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 font-semibold focus:outline-none focus:border-blue-500 cursor-pointer"
+                      >
+                        {(isPrimaryAdmin || userRole === 'it_admin') && <option value="it_admin">IT ADMIN</option>}
+                        <option value="admin">ADMIN</option>
+                        <option value="user">USER</option>
+                      </select>
+                    )}
+                  </div>
+                </div>
+
+                {isFacilityAdmin ? (
+                  <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-blue-800 uppercase tracking-wider flex items-center gap-1.5">
+                        <Building className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Assigned Facility &amp; Department Scope</span>
+                      </span>
+                      <span className="text-[9px] bg-blue-600 text-white font-bold px-1.5 py-0.5 rounded uppercase">Your Facility</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="bg-white p-2 rounded-lg border border-blue-100">
+                        <span className="text-[10px] text-slate-400 block font-semibold">Location</span>
+                        <span className="font-bold text-slate-800 truncate block">
+                          {locations.find((l) => l.id === userLocationId)?.name || 'Facility Location'}
+                        </span>
+                      </div>
+                      <div className="bg-white p-2 rounded-lg border border-blue-100">
+                        <span className="text-[10px] text-slate-400 block font-semibold">Plant</span>
+                        <span className="font-bold text-slate-800 truncate block">
+                          {plants.find((p) => p.id === userPlantId)?.name || 'Production Plant'}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                          Department(s) *
+                        </label>
+                        <ScopeMultiSelect
+                          options={deptOptionsForUser}
+                          selected={userDeptIds}
+                          onChange={setUserDeptIds}
+                          placeholder="-- Select Department(s) --"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                          Sub Department(s) (Optional)
+                        </label>
+                        <ScopeMultiSelect
+                          options={subDeptOptionsForUser}
+                          selected={userSubDepts}
+                          onChange={setUserSubDepts}
+                          placeholder="None"
+                          allowCustom
+                          customPlaceholder="e.g. Line 1"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ) : userRole === 'it_admin' ? (
+                  <div className="p-3.5 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200/80 rounded-xl flex items-start gap-3">
+                    <div className="p-2 bg-blue-600 rounded-lg text-white shadow-xs shrink-0 mt-0.5">
+                      <ShieldCheck className="w-5 h-5" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-xs font-black text-blue-950 uppercase tracking-wider">
+                          Automatic Global Access (Enterprise-Wide)
+                        </h4>
+                        <span className="text-[9px] bg-blue-600 text-white font-extrabold px-1.5 py-0.2 rounded uppercase">
+                          Unrestricted
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-blue-800 leading-relaxed mt-1 font-medium">
+                        <strong>IT Admin</strong> automatically has full unrestricted access to <strong>all Locations, all Production Plants, and all Departments</strong> across PG Electroplast. Specific Location, Plant, or Department assignment is not required.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Filter by Location (Optional)
+                        </label>
+                        <select
+                          value={userLocationId}
+                          onChange={(e) => {
+                            setUserLocationId(e.target.value);
+                          }}
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500 cursor-pointer"
+                        >
+                          <option value="">-- All Locations / Any --</option>
+                          {locations.map((loc) => (
+                            <option key={loc.id} value={loc.id}>
+                              {loc.name} ({loc.code})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-xs font-bold text-slate-700">
+                            Production Plant(s) *
+                          </label>
+                          <span className="text-[10px] text-blue-600 font-bold">Multi-Select</span>
+                        </div>
+                        <ScopeMultiSelect
+                          options={plantOptionsForUser}
+                          selected={userPlantIds}
+                          onChange={(next) => {
+                            setUserPlantIds(next);
+                            setUserPlantId(next[0] || '');
+                          }}
+                          placeholder="-- Select Plant(s) --"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Department(s) *
+                        </label>
+                        <ScopeMultiSelect
+                          options={deptOptionsForUser}
+                          selected={userDeptIds}
+                          onChange={setUserDeptIds}
+                          placeholder="-- Select Department(s) --"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Sub Department(s) (or &quot;None&quot;)
+                        </label>
+                        <ScopeMultiSelect
+                          options={subDeptOptionsForUser}
+                          selected={userSubDepts}
+                          onChange={setUserSubDepts}
+                          placeholder="None"
+                          allowCustom
+                          customPlaceholder="e.g. Line 3"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {userRole !== 'it_admin' && (
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                    <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={userCanEdit}
+                        onChange={(e) => setUserCanEdit(e.target.checked)}
+                        className="h-4 w-4 rounded text-blue-600 focus:ring-0 cursor-pointer"
+                      />
+                      <span>Permission Mode: Full Edit Access Allowed</span>
+                    </label>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 shrink-0 bg-white mt-3">
                 <button
                   type="button"
                   onClick={() => setShowAddUserModal(false)}
@@ -2672,9 +2754,9 @@ function SettingsContent() {
       {/* POPUP MODAL 2: EDIT USER ACCOUNT & SCOPES (IT ADMIN STRICT)               */}
       {/* ========================================================================= */}
       {editingUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white rounded-none sm:rounded-2xl border-0 sm:border border-slate-200 shadow-2xl max-w-lg w-full h-full sm:h-auto max-h-[100dvh] sm:max-h-[90vh] flex flex-col p-4 sm:p-6 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
               <div>
                 <h3 className="text-base font-black text-slate-900">
                   Edit User &amp; Scopes: {editingUser.full_name}
@@ -2691,247 +2773,249 @@ function SettingsContent() {
             </div>
 
             {userModalError && (
-              <div className="flex items-center gap-2 p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700">
+              <div className="flex items-center gap-2 p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 shrink-0 mt-2">
                 <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
                 <span className="font-semibold">{userModalError}</span>
               </div>
             )}
 
-            <form onSubmit={handleUpdateUser} className="space-y-3.5">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Employee ID
-                  </label>
-                  <input
-                    type="text"
-                    value={userEmpCode}
-                    onChange={(e) => setUserEmpCode(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Full Name *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={userName}
-                    onChange={(e) => setUserName(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Mail ID *
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    value={userEmail}
-                    onChange={(e) => setUserEmail(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Assigned Role
-                  </label>
-                  {isFacilityAdmin ? (
-                    <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between">
-                      <div className="flex items-center gap-1.5 font-bold text-xs text-blue-700">
-                        <ShieldCheck className="w-3.5 h-3.5 shrink-0 text-blue-600" />
-                        <span>USER</span>
-                      </div>
-                      <span className="text-[9px] bg-blue-600 text-white font-extrabold px-1.5 py-0.5 rounded uppercase">Locked</span>
-                    </div>
-                  ) : (
-                    <select
-                      value={userRole}
-                      onChange={(e) => {
-                        const newRole = e.target.value as any;
-                        setUserRole(newRole);
-                        if (newRole === 'it_admin') {
-                          setUserLocationId('');
-                          setUserPlantId('');
-                          setUserDeptIds([]);
-                          setUserSubDepts([]);
-                          setUserCanEdit(true);
-                        }
-                      }}
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 font-semibold focus:outline-none focus:border-blue-500 cursor-pointer"
-                    >
-                      {(isPrimaryAdmin || userRole === 'it_admin') && <option value="it_admin">IT ADMIN</option>}
-                      <option value="admin">ADMIN</option>
-                      <option value="user">USER</option>
-                    </select>
-                  )}
-                </div>
-              </div>
-
-              {isFacilityAdmin ? (
-                <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-blue-800 uppercase tracking-wider flex items-center gap-1.5">
-                      <Building className="w-3.5 h-3.5 text-blue-600" />
-                      <span>Assigned Facility &amp; Department Scope</span>
-                    </span>
-                    <span className="text-[9px] bg-blue-600 text-white font-bold px-1.5 py-0.5 rounded uppercase">Your Facility</span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="bg-white p-2 rounded-lg border border-blue-100">
-                      <span className="text-[10px] text-slate-400 block font-semibold">Location</span>
-                      <span className="font-bold text-slate-800 truncate block">
-                        {locations.find((l) => l.id === userLocationId)?.name || 'Facility Location'}
-                      </span>
-                    </div>
-                    <div className="bg-white p-2 rounded-lg border border-blue-100">
-                      <span className="text-[10px] text-slate-400 block font-semibold">Plant</span>
-                      <span className="font-bold text-slate-800 truncate block">
-                        {plants.find((p) => p.id === userPlantId)?.name || 'Production Plant'}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                        Department(s)
-                      </label>
-                      <ScopeMultiSelect
-                        options={deptOptionsForUser}
-                        selected={userDeptIds}
-                        onChange={setUserDeptIds}
-                        placeholder="-- Select Department(s) --"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                        Sub Department(s)
-                      </label>
-                      <ScopeMultiSelect
-                        options={subDeptOptionsForUser}
-                        selected={userSubDepts}
-                        onChange={setUserSubDepts}
-                        placeholder="None"
-                        allowCustom
-                        customPlaceholder="e.g. Line 1"
-                      />
-                    </div>
-                  </div>
-                </div>
-              ) : userRole === 'it_admin' ? (
-                <div className="p-3.5 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200/80 rounded-xl flex items-start gap-3">
-                  <div className="p-2 bg-blue-600 rounded-lg text-white shadow-xs shrink-0 mt-0.5">
-                    <ShieldCheck className="w-5 h-5" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <h4 className="text-xs font-black text-blue-950 uppercase tracking-wider">
-                        Automatic Global Access (Enterprise-Wide)
-                      </h4>
-                      <span className="text-[9px] bg-blue-600 text-white font-extrabold px-1.5 py-0.2 rounded uppercase">
-                        Unrestricted
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-blue-800 leading-relaxed mt-1 font-medium">
-                      <strong>IT Admin</strong> automatically has full unrestricted access to <strong>all Locations, all Production Plants, and all Departments</strong> across PG Electroplast. Specific Location, Plant, or Department assignment is not required.
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Location
-                      </label>
-                      <select
-                        value={userLocationId}
-                        onChange={(e) => {
-                          setUserLocationId(e.target.value);
-                          setUserPlantId('');
-                        }}
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500 cursor-pointer"
-                      >
-                        <option value="">-- All / Unrestricted --</option>
-                        {locations.map((loc) => (
-                          <option key={loc.id} value={loc.id}>
-                            {loc.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Production Plant
-                      </label>
-                      <select
-                        value={userPlantId}
-                        onChange={(e) => setUserPlantId(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500 cursor-pointer"
-                      >
-                        <option value="">-- All / Unrestricted --</option>
-                        {availablePlantsForUser.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Department(s)
-                      </label>
-                      <ScopeMultiSelect
-                        options={deptOptionsForUser}
-                        selected={userDeptIds}
-                        onChange={setUserDeptIds}
-                        placeholder="-- Select Department(s) --"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Sub Department(s)
-                      </label>
-                      <ScopeMultiSelect
-                        options={subDeptOptionsForUser}
-                        selected={userSubDepts}
-                        onChange={setUserSubDepts}
-                        placeholder="None"
-                        allowCustom
-                        customPlaceholder="e.g. Line 3"
-                      />
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {userRole !== 'it_admin' && (
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-                  <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+            <form onSubmit={handleUpdateUser} className="flex-1 min-h-0 flex flex-col justify-between mt-2">
+              <div className="flex-1 overflow-y-auto space-y-3.5 pr-1 -mr-1 py-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Employee ID
+                    </label>
                     <input
-                      type="checkbox"
-                      checked={userCanEdit}
-                      onChange={(e) => setUserCanEdit(e.target.checked)}
-                      className="h-4 w-4 rounded text-blue-600 focus:ring-0 cursor-pointer"
+                      type="text"
+                      value={userEmpCode}
+                      onChange={(e) => setUserEmpCode(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white"
                     />
-                    <span>Permission Mode: Full Edit Access Allowed</span>
-                  </label>
-                </div>
-              )}
+                  </div>
 
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Full Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={userName}
+                      onChange={(e) => setUserName(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Mail ID *
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={userEmail}
+                      onChange={(e) => setUserEmail(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Assigned Role
+                    </label>
+                    {isFacilityAdmin ? (
+                      <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 font-bold text-xs text-blue-700">
+                          <ShieldCheck className="w-3.5 h-3.5 shrink-0 text-blue-600" />
+                          <span>USER</span>
+                        </div>
+                        <span className="text-[9px] bg-blue-600 text-white font-extrabold px-1.5 py-0.5 rounded uppercase">Locked</span>
+                      </div>
+                    ) : (
+                      <select
+                        value={userRole}
+                        onChange={(e) => {
+                          const newRole = e.target.value as any;
+                          setUserRole(newRole);
+                          if (newRole === 'it_admin') {
+                            setUserLocationId('');
+                            setUserPlantId('');
+                            setUserPlantIds([]);
+                            setUserDeptIds([]);
+                            setUserSubDepts([]);
+                            setUserCanEdit(true);
+                          }
+                        }}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 font-semibold focus:outline-none focus:border-blue-500 cursor-pointer"
+                      >
+                        {(isPrimaryAdmin || userRole === 'it_admin') && <option value="it_admin">IT ADMIN</option>}
+                        <option value="admin">ADMIN</option>
+                        <option value="user">USER</option>
+                      </select>
+                    )}
+                  </div>
+                </div>
+
+                {isFacilityAdmin ? (
+                  <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-blue-800 uppercase tracking-wider flex items-center gap-1.5">
+                        <Building className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Assigned Facility &amp; Department Scope</span>
+                      </span>
+                      <span className="text-[9px] bg-blue-600 text-white font-bold px-1.5 py-0.5 rounded uppercase">Your Facility</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="bg-white p-2 rounded-lg border border-blue-100">
+                        <span className="text-[10px] text-slate-400 block font-semibold">Location</span>
+                        <span className="font-bold text-slate-800 truncate block">
+                          {locations.find((l) => l.id === userLocationId)?.name || 'Facility Location'}
+                        </span>
+                      </div>
+                      <div className="bg-white p-2 rounded-lg border border-blue-100">
+                        <span className="text-[10px] text-slate-400 block font-semibold">Plant</span>
+                        <span className="font-bold text-slate-800 truncate block">
+                          {plants.find((p) => p.id === userPlantId)?.name || 'Production Plant'}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                          Department(s)
+                        </label>
+                        <ScopeMultiSelect
+                          options={deptOptionsForUser}
+                          selected={userDeptIds}
+                          onChange={setUserDeptIds}
+                          placeholder="-- Select Department(s) --"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                          Sub Department(s)
+                        </label>
+                        <ScopeMultiSelect
+                          options={subDeptOptionsForUser}
+                          selected={userSubDepts}
+                          onChange={setUserSubDepts}
+                          placeholder="None"
+                          allowCustom
+                          customPlaceholder="e.g. Line 1"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ) : userRole === 'it_admin' ? (
+                  <div className="p-3.5 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200/80 rounded-xl flex items-start gap-3">
+                    <div className="p-2 bg-blue-600 rounded-lg text-white shadow-xs shrink-0 mt-0.5">
+                      <ShieldCheck className="w-5 h-5" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-xs font-black text-blue-950 uppercase tracking-wider">
+                          Automatic Global Access (Enterprise-Wide)
+                        </h4>
+                        <span className="text-[9px] bg-blue-600 text-white font-extrabold px-1.5 py-0.2 rounded uppercase">
+                          Unrestricted
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-blue-800 leading-relaxed mt-1 font-medium">
+                        <strong>IT Admin</strong> automatically has full unrestricted access to <strong>all Locations, all Production Plants, and all Departments</strong> across PG Electroplast. Specific Location, Plant, or Department assignment is not required.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Filter by Location (Optional)
+                        </label>
+                        <select
+                          value={userLocationId}
+                          onChange={(e) => {
+                            setUserLocationId(e.target.value);
+                          }}
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500 cursor-pointer"
+                        >
+                          <option value="">-- All Locations / Any --</option>
+                          {locations.map((loc) => (
+                            <option key={loc.id} value={loc.id}>
+                              {loc.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-xs font-bold text-slate-700">
+                            Production Plant(s)
+                          </label>
+                          <span className="text-[10px] text-blue-600 font-bold">Multi-Select</span>
+                        </div>
+                        <ScopeMultiSelect
+                          options={plantOptionsForUser}
+                          selected={userPlantIds}
+                          onChange={(next) => {
+                            setUserPlantIds(next);
+                            setUserPlantId(next[0] || '');
+                          }}
+                          placeholder="-- Select Plant(s) --"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Department(s)
+                        </label>
+                        <ScopeMultiSelect
+                          options={deptOptionsForUser}
+                          selected={userDeptIds}
+                          onChange={setUserDeptIds}
+                          placeholder="-- Select Department(s) --"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Sub Department(s)
+                        </label>
+                        <ScopeMultiSelect
+                          options={subDeptOptionsForUser}
+                          selected={userSubDepts}
+                          onChange={setUserSubDepts}
+                          placeholder="None"
+                          allowCustom
+                          customPlaceholder="e.g. Line 3"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {userRole !== 'it_admin' && (
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                    <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={userCanEdit}
+                        onChange={(e) => setUserCanEdit(e.target.checked)}
+                        className="h-4 w-4 rounded text-blue-600 focus:ring-0 cursor-pointer"
+                      />
+                      <span>Permission Mode: Full Edit Access Allowed</span>
+                    </label>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 shrink-0 bg-white mt-3">
                 <button
                   type="button"
                   onClick={() => setEditingUser(null)}
