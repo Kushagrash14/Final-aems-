@@ -3917,6 +3917,7 @@ export interface BatchImportPayload {
   plant_id: string;
   department_id: string;
   items: BatchImportAssetItem[];
+  unassigned_custody?: 'in_house' | 'in_storage';
 }
 
 export interface BatchImportResult {
@@ -3925,6 +3926,7 @@ export interface BatchImportResult {
   assets_created: number;
   employees_created: number;
   assets_in_stock: number;
+  assets_in_house: number;
   assets_assigned: number;
   imported_tags: string[];
   created_employees: Array<{ id: string; emp_code: string; full_name: string }>;
@@ -3935,7 +3937,7 @@ export async function batchImportAssets(
   payload: BatchImportPayload,
   userId: string
 ): Promise<BatchImportResult> {
-  const { location_id, plant_id, department_id, items } = payload;
+  const { location_id, plant_id, department_id, items, unassigned_custody } = payload;
   const now = new Date().toISOString();
 
   const result: BatchImportResult = {
@@ -3944,6 +3946,7 @@ export async function batchImportAssets(
     assets_created: 0,
     employees_created: 0,
     assets_in_stock: 0,
+    assets_in_house: 0,
     assets_assigned: 0,
     imported_tags: [],
     created_employees: [],
@@ -4018,8 +4021,14 @@ export async function batchImportAssets(
     // Custodian Resolution & Auto-Creation Logic
     let assignedEmployeeId: string | null = null;
     const cleanEmpCode = item.emp_code?.trim().toUpperCase();
+    const cleanEmpName = item.emp_name?.trim().toUpperCase();
 
-    if (cleanEmpCode) {
+    const IN_HOUSE_IDENTIFIERS = ['IN HOUSE', 'IN-HOUSE', 'INHOUSE', 'DEPARTMENT', 'DEPT', 'PLANT', 'N/A', 'NA', 'NONE'];
+    const isExplicitInHouse =
+      (cleanEmpCode && IN_HOUSE_IDENTIFIERS.includes(cleanEmpCode)) ||
+      (cleanEmpName && IN_HOUSE_IDENTIFIERS.includes(cleanEmpName));
+
+    if (cleanEmpCode && !isExplicitInHouse) {
       if (empLookup.has(cleanEmpCode)) {
         const emp = empLookup.get(cleanEmpCode)!;
         if (emp.status !== 'inactive' && (emp.status as string) !== 'resigned') {
@@ -4095,7 +4104,15 @@ export async function batchImportAssets(
     let assignedTag = await generateUniqueAssetTag(catId, itAssetType);
     const assetId = crypto.randomUUID();
 
-    const assetStatus = assignedEmployeeId ? ('in_service' as const) : ('in_storage' as const);
+    const isTargetInHouse =
+      !assignedEmployeeId &&
+      (isExplicitInHouse || unassigned_custody === 'in_house');
+
+    const assetStatus = assignedEmployeeId
+      ? ('in_service' as const)
+      : isTargetInHouse
+      ? ('in_service' as const)
+      : ('in_storage' as const);
 
     const docMetadata = JSON.stringify({
       hostname: item.hostname?.trim().toUpperCase() || null,
@@ -4199,6 +4216,23 @@ export async function batchImportAssets(
         } catch (assignErr) {
           console.warn(`Failed to log asset_assignment record for ${assignedTag}:`, assignErr);
         }
+      } else if (isTargetInHouse) {
+        try {
+          await recordTransfer({
+            asset_id: assetId,
+            from_department_id: department_id,
+            to_department_id: department_id,
+            from_location_id: location_id,
+            to_location_id: location_id,
+            from_plant_id: plant_id,
+            to_plant_id: plant_id,
+            transferred_by: userId,
+            reason: `${IN_HOUSE_REASON_PREFIX} • Deployed during Batch Import`,
+            transferred_at: now,
+          });
+        } catch (transferErr) {
+          console.warn(`Failed to log in-house transfer for ${assignedTag}:`, transferErr);
+        }
       }
     }
 
@@ -4206,6 +4240,8 @@ export async function batchImportAssets(
     result.imported_tags.push(assignedTag);
     if (assignedEmployeeId) {
       result.assets_assigned++;
+    } else if (isTargetInHouse) {
+      result.assets_in_house++;
     } else {
       result.assets_in_stock++;
     }
@@ -4214,5 +4250,82 @@ export async function batchImportAssets(
   invalidateAssetCache();
   invalidateMasterDataCache();
   return result;
+}
+
+export async function setImportedStockToInHouse(): Promise<{
+  updated: number;
+  departments: Record<string, number>;
+}> {
+  const now = new Date().toISOString();
+  let updated = 0;
+  const deptCounts: Record<string, number> = {};
+
+  if (env.isMockMode) {
+    const deptMap = new Map(memory.departments.map((d) => [d.id, d.name]));
+    for (const a of memory.assets) {
+      if (!a.is_deleted && a.status === 'in_storage' && !a.assigned_employee_id) {
+        a.status = 'in_service';
+        a.updated_at = now;
+        updated++;
+
+        const deptName = deptMap.get(a.current_department_id) || 'Unknown';
+        deptCounts[deptName] = (deptCounts[deptName] || 0) + 1;
+
+        memory.assetTransfers ??= [];
+        memory.assetTransfers.push({
+          id: crypto.randomUUID(),
+          asset_id: a.id,
+          from_department_id: a.current_department_id,
+          to_department_id: a.current_department_id,
+          from_location_id: a.current_location_id,
+          to_location_id: a.current_location_id,
+          from_plant_id: a.current_plant_id,
+          to_plant_id: a.current_plant_id,
+          transferred_by: a.created_by || null,
+          reason: `${IN_HOUSE_REASON_PREFIX} • Migrated from old AEMS as In-House Department Asset`,
+          transferred_at: a.created_at || now,
+        });
+      }
+    }
+    invalidateAssetCache();
+    return { updated, departments: deptCounts };
+  }
+
+  const { data: rows, error } = await db
+    .from('assets')
+    .select('id, current_department_id, current_location_id, current_plant_id, created_by, created_at')
+    .eq('is_deleted', false)
+    .eq('status', 'in_storage')
+    .is('assigned_employee_id', null);
+
+  if (error) throw new Error(error.message);
+
+  for (const r of rows || []) {
+    await db
+      .from('assets')
+      .update({ status: 'in_service', updated_at: now })
+      .eq('id', r.id);
+
+    try {
+      await recordTransfer({
+        asset_id: r.id,
+        from_department_id: r.current_department_id,
+        to_department_id: r.current_department_id,
+        from_location_id: r.current_location_id,
+        to_location_id: r.current_location_id,
+        from_plant_id: r.current_plant_id,
+        to_plant_id: r.current_plant_id,
+        transferred_by: r.created_by || null,
+        reason: `${IN_HOUSE_REASON_PREFIX} • Migrated from old AEMS as In-House Department Asset`,
+        transferred_at: r.created_at || now,
+      });
+    } catch (e) {
+      console.warn('Failed recording transfer for in-house migration:', e);
+    }
+    updated++;
+  }
+
+  invalidateAssetCache();
+  return { updated, departments: deptCounts };
 }
 

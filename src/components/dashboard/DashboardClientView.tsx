@@ -339,7 +339,7 @@ export default function DashboardClientView({
 
         <DrillDownContext.Provider value={drillDownApi}>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 md:[&>*:last-child]:col-span-2 xl:[&>*:last-child]:col-span-1 gap-4.5 relative z-10 items-stretch">
-          <AssetPlantChart assets={filteredAssets} plants={plants} />
+          <AssetPlantChart assets={filteredAssets} plants={plants} locations={locations} />
           <AssetStatusCard assets={filteredAssets} />
           <AssetDepartmentChart assets={filteredAssets} departments={departments} />
         </div>
@@ -351,7 +351,7 @@ export default function DashboardClientView({
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 md:[&>*:last-child]:col-span-2 xl:[&>*:last-child]:col-span-1 gap-4.5 relative z-10 items-stretch">
-          <AssetValueByPlantChart assets={filteredAssets} plants={plants} />
+          <AssetValueByPlantChart assets={filteredAssets} plants={plants} locations={locations} />
           <AmcCard assets={filteredAssets} />
           <DepartmentTrendChart assets={filteredAssets} departments={departments} />
         </div>

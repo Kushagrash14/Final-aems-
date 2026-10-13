@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { location_id, plant_id, department_id, items } = body as BatchImportPayload;
+    const { location_id, plant_id, department_id, items, unassigned_custody } = body as BatchImportPayload;
 
     if (!location_id || !plant_id || !department_id) {
       return NextResponse.json(
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
 
     // Execute atomic batch import with automatic employee auto-provisioning
     const result = await batchImportAssets(
-      { location_id, plant_id, department_id, items },
+      { location_id, plant_id, department_id, items, unassigned_custody },
       validation.user.id
     );
 
@@ -58,7 +58,9 @@ export async function POST(req: NextRequest) {
         assets_created: result.assets_created,
         employees_created: result.employees_created,
         assets_assigned: result.assets_assigned,
+        assets_in_house: result.assets_in_house,
         assets_in_stock: result.assets_in_stock,
+        unassigned_custody,
         location_id,
         plant_id,
         department_id,

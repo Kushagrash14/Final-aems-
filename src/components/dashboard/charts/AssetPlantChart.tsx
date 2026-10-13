@@ -1,8 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { ChevronDown } from 'lucide-react';
-import { Asset, Plant } from '@/types/database';
+import { Asset, Plant, Location } from '@/types/database';
 import ChartCard, { EmptyState } from './ChartCard';
 import { CountUp } from './useCountUp';
 import { useDrillDown } from './DrillDownContext';
@@ -10,6 +10,7 @@ import { useDrillDown } from './DrillDownContext';
 interface AssetPlantChartProps {
   assets: Asset[];
   plants: Plant[];
+  locations?: Location[];
 }
 
 interface Bar {
@@ -21,6 +22,7 @@ interface Bar {
 interface Group {
   id: string;
   label: string;
+  locationName?: string;
   bars: Bar[];
 }
 
@@ -43,10 +45,29 @@ function niceStep(max: number): number {
   return ([1, 2, 3, 5, 10].find((s) => s * magnitude >= raw) || 10) * magnitude;
 }
 
-export default function AssetPlantChart({ assets, plants }: AssetPlantChartProps) {
+export default function AssetPlantChart({ assets, plants, locations }: AssetPlantChartProps) {
   const [plantId, setPlantId] = useState<string>('all');
 
-  const sortedPlants = useMemo(() => [...plants].sort((a, b) => a.name.localeCompare(b.name)), [plants]);
+  const locMap = useMemo(() => {
+    const map = new Map<string, string>();
+    (locations || []).forEach((l) => map.set(l.id, l.name));
+    return map;
+  }, [locations]);
+
+  const getLocName = useCallback(
+    (p: Plant) => p.location?.name || locMap.get(p.location_id) || '',
+    [locMap]
+  );
+
+  const sortedPlants = useMemo(
+    () =>
+      [...plants].sort((a, b) => {
+        const nameCmp = a.name.localeCompare(b.name);
+        if (nameCmp !== 0) return nameCmp;
+        return getLocName(a).localeCompare(getLocName(b));
+      }),
+    [plants, getLocName]
+  );
 
   const assetsByPlant = useMemo(() => {
     const map = new Map<string, Asset[]>();
@@ -69,9 +90,11 @@ export default function AssetPlantChart({ assets, plants }: AssetPlantChartProps
     if (plantId === 'all') {
       return sortedPlants.map((p) => {
         const list = assetsByPlant.get(p.id) || [];
+        const loc = getLocName(p);
         return {
           id: p.id,
           label: p.name,
+          locationName: loc,
           bars: [
             { key: 'total', value: list.length, className: TOTAL_BAR },
             { key: 'assigned', value: list.filter((a) => a.status === 'in_service').length, className: ASSIGNED_BAR },
@@ -84,7 +107,7 @@ export default function AssetPlantChart({ assets, plants }: AssetPlantChartProps
       label: s.label,
       bars: [{ key: s.id, value: scopedAssets.filter((a) => a.status === s.id).length, className: s.className }],
     }));
-  }, [plantId, sortedPlants, assetsByPlant, scopedAssets]);
+  }, [plantId, sortedPlants, assetsByPlant, scopedAssets, getLocName]);
 
   const total = scopedAssets.length;
   const assigned = scopedAssets.filter((a) => a.status === 'in_service').length;
@@ -96,10 +119,13 @@ export default function AssetPlantChart({ assets, plants }: AssetPlantChartProps
     if (plantId === 'all') {
       const list = assetsByPlant.get(g.id) || [];
       const assignedOnly = b.key === 'assigned';
-      openAssets(`${g.label} — ${assignedOnly ? 'Assigned' : 'All Assets'}`, assignedOnly ? list.filter((a) => a.status === 'in_service') : list);
+      const displayName = g.locationName ? `${g.label} (${g.locationName})` : g.label;
+      openAssets(`${displayName} — ${assignedOnly ? 'Assigned' : 'All Assets'}`, assignedOnly ? list.filter((a) => a.status === 'in_service') : list);
       return;
     }
-    const plantName = sortedPlants.find((p) => p.id === plantId)?.name || '';
+    const targetPlant = sortedPlants.find((p) => p.id === plantId);
+    const loc = targetPlant ? getLocName(targetPlant) : '';
+    const plantName = targetPlant ? `${targetPlant.name}${loc ? ` (${loc})` : ''}` : '';
     openAssets(`${plantName} — ${g.label}`, scopedAssets.filter((a) => a.status === b.key));
   };
 
@@ -130,11 +156,14 @@ export default function AssetPlantChart({ assets, plants }: AssetPlantChartProps
               className="appearance-none cursor-pointer rounded-md border border-slate-200 bg-white pl-2.5 pr-7 py-1 text-[11px] font-bold text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
             >
               <option value="all">All Plants</option>
-              {sortedPlants.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
+              {sortedPlants.map((p) => {
+                const loc = getLocName(p);
+                return (
+                  <option key={p.id} value={p.id}>
+                    {p.name}{loc ? ` (${loc})` : ''}
+                  </option>
+                );
+              })}
             </select>
             <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
           </div>
@@ -217,11 +246,20 @@ export default function AssetPlantChart({ assets, plants }: AssetPlantChartProps
 
           <div className="flex gap-2 mt-1.5">
             <div className="w-9 shrink-0" />
-            <div className="flex-1 flex justify-around gap-3">
+            <div className="flex-1 flex justify-around gap-2">
               {groups.map((g) => (
-                <span key={g.id} className="flex-1 min-w-0 text-center text-[11px] font-bold text-slate-800 leading-tight break-words line-clamp-2" title={g.label}>
-                  {g.label}
-                </span>
+                <div
+                  key={g.id}
+                  className="flex-1 min-w-0 text-center leading-tight break-words px-0.5"
+                  title={g.locationName ? `${g.label} (${g.locationName})` : g.label}
+                >
+                  <div className="text-[11px] font-bold text-slate-800 truncate">{g.label}</div>
+                  {g.locationName && (
+                    <div className="text-[9.5px] font-bold text-indigo-600 uppercase tracking-wide truncate">
+                      {g.locationName}
+                    </div>
+                  )}
+                </div>
               ))}
             </div>
           </div>

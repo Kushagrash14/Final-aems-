@@ -365,15 +365,15 @@ export default function DashboardKPIModal({
       case 'assigned':
         return {
           title: 'ASSIGNED / IN USE ASSETS',
-          subtitle: 'Assets currently assigned and in active custody of employees',
+          subtitle: 'Assets in active operational service (Employee Custodians + In-House Department Custody)',
           badgeColor: 'bg-blue-50 text-blue-700 border-blue-200',
           icon: User,
           iconColor: 'text-blue-600 bg-blue-50 border-blue-200',
         };
       case 'available':
         return {
-          title: 'AVAILABLE / IN-HOUSE ASSETS',
-          subtitle: 'Stock pool assets ready for assignment + assets deployed In-House (departmental use)',
+          title: 'AVAILABLE IN STOCK',
+          subtitle: 'Unassigned equipment currently residing in inventory/storage pool ready for deployment',
           badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
           icon: CheckCircle2,
           iconColor: 'text-emerald-600 bg-emerald-50 border-emerald-200',
@@ -434,20 +434,11 @@ export default function DashboardKPIModal({
       case 'cost':
         return localAssets.filter((a) => !a.is_deleted);
       case 'assigned':
-        // Only assets that have an actual employee custodian
-        return localAssets.filter(
-          (a) => Boolean(a.assigned_employee_id || a.assigned_employee)
-        );
+        // All active assets deployed in service (Staff Assigned + In-House Dept Custody)
+        return localAssets.filter((a) => !a.is_deleted && a.status === 'in_service');
       case 'available':
-        // Stock Pool (in_storage) + In-House Active (in_service, no employee)
-        return localAssets.filter(
-          (a) =>
-            !a.is_deleted &&
-            (
-              a.status === 'in_storage' ||
-              (a.status === 'in_service' && !a.assigned_employee_id && !a.assigned_employee)
-            )
-        );
+        // Available stock pool only (in_storage)
+        return localAssets.filter((a) => !a.is_deleted && a.status === 'in_storage');
       case 'maintenance': {
         const openComplaintMachineIds = new Set(
           complaints
@@ -1268,9 +1259,9 @@ export default function DashboardKPIModal({
                             </span>
                           ) : isInHouse ? (
                             <div className="space-y-0.5">
-                              <span className="inline-flex items-center gap-1 text-[10px] font-black text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 uppercase">
-                                <Building2 className="w-3 h-3 text-emerald-600" />
-                                <span>In-House Active</span>
+                              <span className="inline-flex items-center gap-1 text-[10px] font-black text-blue-800 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 uppercase">
+                                <Building2 className="w-3 h-3 text-blue-600" />
+                                <span>Assigned (In-House)</span>
                               </span>
                               <div className="text-[10px] font-bold text-slate-600">
                                 {deptName}
@@ -1300,16 +1291,16 @@ export default function DashboardKPIModal({
                                 : asset.status === 'maintenance'
                                 ? 'bg-amber-50 text-amber-700 border-amber-200'
                                 : isInHouse
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 font-bold'
+                                ? 'bg-blue-50 text-blue-700 border-blue-200 font-bold'
                                 : isStock
                                 ? 'bg-amber-50 text-amber-700 border-amber-200'
                                 : 'bg-blue-50 text-blue-700 border-blue-200'
                             }`}
                           >
                             {isInHouse
-                              ? 'IN-HOUSE ACTIVE'
+                              ? 'ASSIGNED (IN-HOUSE)'
                               : asset.status === 'in_service'
-                              ? 'IN USE'
+                              ? 'ASSIGNED (STAFF)'
                               : asset.status === 'in_storage'
                               ? 'AVAILABLE IN STOCK'
                               : asset.status.toUpperCase()}

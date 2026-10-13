@@ -177,16 +177,10 @@ function NavbarContent({ user, scope }: NavbarProps) {
   const [deptCategoryMap, setDeptCategoryMap] = useState<Record<string, string[]>>({});
 
   // Popover Open States
-  const [scopeFilterOpen, setScopeFilterOpen] = useState(false);
   const [hrFilterOpen, setHrFilterOpen] = useState(false);
   const [entryMenuOpen, setEntryMenuOpen] = useState(false);
-  const scopeRef = useRef<HTMLDivElement | null>(null);
   const entryMenuRef = useRef<HTMLDivElement | null>(null);
   const hrFilterRef = useRef<HTMLDivElement | null>(null);
-
-  // Temp picker state inside scope popover
-  const [tempLocId, setTempLocId] = useState('');
-  const [tempPltId, setTempPltId] = useState('');
 
   const [isPending, startTransition] = useTransition();
 
@@ -221,12 +215,9 @@ function NavbarContent({ user, scope }: NavbarProps) {
     };
   }, [fetchLookups]);
 
-  // Close scope, entry menu & filter popovers on outside click
+  // Close entry menu & filter popovers on outside click
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (scopeRef.current && !scopeRef.current.contains(e.target as Node)) {
-        setScopeFilterOpen(false);
-      }
       if (entryMenuRef.current && !entryMenuRef.current.contains(e.target as Node)) {
         setEntryMenuOpen(false);
       }
@@ -234,11 +225,11 @@ function NavbarContent({ user, scope }: NavbarProps) {
         setHrFilterOpen(false);
       }
     }
-    if (scopeFilterOpen || entryMenuOpen || hrFilterOpen) {
+    if (entryMenuOpen || hrFilterOpen) {
       document.addEventListener('mousedown', handleClickOutside);
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [scopeFilterOpen, entryMenuOpen, hrFilterOpen]);
+  }, [entryMenuOpen, hrFilterOpen]);
 
   // Non-blocking URL search parameters update
   const updateUrlParams = useCallback(
@@ -265,34 +256,6 @@ function NavbarContent({ user, scope }: NavbarProps) {
     },
     [router]
   );
-
-  const handleOpenScope = () => {
-    setTempLocId(localLocation);
-    setTempPltId(localPlant);
-    setScopeFilterOpen((prev) => !prev);
-  };
-
-  const handleApplyScope = () => {
-    setScopeFilterOpen(false);
-    setLocalLocation(tempLocId);
-    setLocalPlant(tempPltId);
-    updateUrlParams({
-      locationId: tempLocId,
-      plantId: tempPltId,
-    });
-  };
-
-  const handleResetScope = () => {
-    setTempLocId('');
-    setTempPltId('');
-    setScopeFilterOpen(false);
-    setLocalLocation('');
-    setLocalPlant('');
-    updateUrlParams({
-      locationId: null,
-      plantId: null,
-    });
-  };
 
   // Instant Cascading Selection Handlers with 0ms optimistic UI update
   const handleLocationChange = (locId: string) => {
@@ -418,7 +381,6 @@ function NavbarContent({ user, scope }: NavbarProps) {
     ? (assignedPlt?.name || (plants.length === 0 ? 'Loading...' : 'Assigned Plant'))
     : (activePltObj ? (activePltObj.name.length > 18 ? activePltObj.name.slice(0, 18) + '...' : activePltObj.name) : 'All Plants');
   const deptDisplay = assignedDept?.name || '';
-  const isFilterActive = Boolean(localLocation || localPlant);
 
   const availablePlantsForHR = useMemo(() => {
     if (!localLocation) return plants;
@@ -598,8 +560,8 @@ function NavbarContent({ user, scope }: NavbarProps) {
       {/* Right Section — shrink-0 so it never squishes */}
       <div className="flex items-center gap-2 shrink-0 pl-3">
 
-        {/* Compact Scoped Plant Badge for Facility Admin & Users */}
-        {!isItAdmin ? (
+        {/* Compact Scoped Plant Badge for Facility Admin & Users (Read-only facility scope indicator) */}
+        {!isItAdmin && (
           <div
             className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] border bg-white/[0.06] border-white/10 text-slate-200 shadow-2xs select-none"
             title={`Assigned Facility Scope: ${locDisplay} > ${pltDisplay}${deptDisplay ? ` > ${deptDisplay}` : ''}`}
@@ -608,109 +570,6 @@ function NavbarContent({ user, scope }: NavbarProps) {
             <span>
               Plant: <strong className="text-white font-semibold">{pltDisplay}</strong>
             </span>
-          </div>
-        ) : (
-          /* Interactive Compact Plant Scope Badge (IT ADMIN ONLY) */
-          <div className="relative hidden md:block" ref={scopeRef}>
-            <button
-              type="button"
-              onClick={handleOpenScope}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] border transition-all cursor-pointer select-none ${
-                isFilterActive
-                  ? 'bg-blue-600/30 border-blue-400 text-blue-100 shadow-xs'
-                  : 'bg-white/[0.06] border-white/10 text-slate-300 hover:bg-white/[0.12] hover:text-white'
-              }`}
-              title={`Location & Plant Scope (${locDisplay} > ${pltDisplay})`}
-            >
-              <MapPin className={`w-3.5 h-3.5 shrink-0 ${isFilterActive ? 'text-blue-400 animate-pulse' : 'text-emerald-400'}`} />
-              <span>
-                Plant: <strong className="text-white font-semibold">{pltDisplay}</strong>
-              </span>
-              <ChevronDown className={`w-3 h-3 transition-transform ${scopeFilterOpen ? 'rotate-180 text-blue-400' : 'text-slate-400'}`} />
-            </button>
-
-            {/* Scope Dropdown Popover */}
-            {scopeFilterOpen && (
-              <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 p-4 z-50 text-xs text-slate-800 space-y-3 animate-in fade-in zoom-in-95 duration-150">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                  <div className="flex items-center gap-1.5 font-bold text-slate-900">
-                    <MapPin className="w-4 h-4 text-blue-600" />
-                    <span>Filter Location &amp; Plant Scope</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setScopeFilterOpen(false)}
-                    className="p-1 text-slate-400 hover:text-slate-700 rounded-md"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
-                    Location
-                  </label>
-                  <select
-                    value={tempLocId}
-                    onChange={(e) => {
-                      const newLoc = e.target.value;
-                      setTempLocId(newLoc);
-                      if (newLoc) {
-                        const plantMatch = (plants.length ? plants : PLANTS_STATIC).find((p) => p.id === tempPltId);
-                        if (plantMatch && (plantMatch as Plant).location_id !== newLoc) {
-                          setTempPltId('');
-                        }
-                      }
-                    }}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-800 font-semibold focus:outline-none focus:border-blue-500 cursor-pointer"
-                  >
-                    {(locations.length ? locations : LOCATIONS_STATIC).map((loc) => (
-                      <option key={loc.id} value={loc.id}>
-                        {loc.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
-                    Production Plant
-                  </label>
-                  <select
-                    value={tempPltId}
-                    onChange={(e) => setTempPltId(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-800 font-semibold focus:outline-none focus:border-blue-500 cursor-pointer"
-                  >
-                    {(plants.length ? plants : PLANTS_STATIC)
-                      .filter((p) => !tempLocId || !p.location_id || p.location_id === tempLocId)
-                      .map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-
-                <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                  <button
-                    type="button"
-                    onClick={handleResetScope}
-                    className="text-[11px] font-bold text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
-                  >
-                    Reset to All
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleApplyScope}
-                    className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs shadow-xs transition-colors cursor-pointer flex items-center gap-1"
-                  >
-                    <Check className="w-3.5 h-3.5" />
-                    <span>Apply Scope</span>
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         )}
 

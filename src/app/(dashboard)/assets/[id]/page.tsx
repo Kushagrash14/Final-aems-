@@ -349,11 +349,11 @@ export default function AssetDetailPage() {
     : isDamaged
     ? 'Damaged'
     : isInHouse
-    ? 'In-House Active'
+    ? 'Assigned (In-House)'
     : isStock
     ? 'Available in Stock'
     : hasEmp
-    ? 'Assigned'
+    ? 'Assigned (Staff)'
     : asset.status.toUpperCase();
   const conditionDisplay = (asset as any).condition === 'existing_asset'
     ? 'EXISTING ASSETS'
@@ -633,7 +633,7 @@ export default function AssetDetailPage() {
                   : isDamaged
                   ? 'bg-amber-50 text-amber-700 border-amber-300'
                   : isInHouse
-                  ? 'bg-emerald-50 text-emerald-700 border-emerald-300 font-bold'
+                  ? 'bg-blue-50 text-blue-700 border-blue-300 font-bold'
                   : isStock
                   ? 'bg-amber-50 text-amber-700 border-amber-300'
                   : 'bg-blue-50 text-blue-700 border-blue-300'
@@ -646,7 +646,7 @@ export default function AssetDetailPage() {
                 : isDamaged
                 ? 'DAMAGED / UNDER REPAIR'
                 : isInHouse
-                ? 'IN-HOUSE ACTIVE'
+                ? 'ASSIGNED (IN-HOUSE)'
                 : isStock
                 ? 'AVAILABLE IN STOCK POOL'
                 : 'CURRENTLY ASSIGNED'}
@@ -728,18 +728,18 @@ export default function AssetDetailPage() {
               </div>
             </div>
           ) : isInHouse ? (
-            <div className="p-3.5 bg-emerald-50/80 rounded-xl border border-emerald-200 flex items-center gap-3">
-              <div className="h-9 w-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-black shrink-0 shadow-xs">
+            <div className="p-3.5 bg-blue-50/80 rounded-xl border border-blue-200 flex items-center gap-3">
+              <div className="h-9 w-9 rounded-xl bg-blue-600 text-white flex items-center justify-center font-black shrink-0 shadow-xs">
                 <Building2 className="w-5 h-5 text-white" />
               </div>
               <div>
-                <span className="font-black text-emerald-950 text-xs uppercase tracking-wider block">
-                  In-House Active Equipment ({asset.department?.name || 'Department Custody'})
+                <span className="font-black text-blue-950 text-xs uppercase tracking-wider block">
+                  Assigned: In-House Equipment ({asset.department?.name || 'Department Custody'})
                 </span>
-                <span className="text-[11px] text-emerald-800 font-medium">
+                <span className="text-[11px] text-blue-800 font-medium">
                   {specs.exact_location
                     ? `Installed Location: ${specs.exact_location}`
-                    : 'Active in-house equipment deployed in department.'}
+                    : 'Active in-house equipment deployed in department custody.'}
                 </span>
               </div>
             </div>

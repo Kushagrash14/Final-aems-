@@ -66,11 +66,11 @@ export default function DashboardKPISection({
   // Compute KPI Counts & Total Valuation
   const activeAssets = currentAssets.filter((a) => !a.is_deleted);
   const totalAssetsCount = activeAssets.length;
-  // Assigned: only assets that have an actual employee custodian
+  // Assigned / In Use: ALL active assets deployed in service (Staff Assigned + In-House Dept Custody)
   const assignedCount = activeAssets.filter(
-    (a) => Boolean(a.assigned_employee_id || a.assigned_employee)
+    (a) => a.status === 'in_service'
   ).length;
-  // In-House: deployed inside company premises, no personal employee custodian
+  // In-House breakdown
   const inHouseCount = activeAssets.filter(
     (a) => a.status === 'in_service' && !a.assigned_employee_id && !a.assigned_employee
   ).length;
@@ -78,8 +78,8 @@ export default function DashboardKPISection({
   const stockPoolCount = activeAssets.filter(
     (a) => a.status === 'in_storage'
   ).length;
-  // Available KPI card = Stock Pool + In-House combined
-  const availableCount = stockPoolCount + inHouseCount;
+  // Available KPI card = Stock Pool only
+  const availableCount = stockPoolCount;
 
   const totalCost = activeAssets.reduce(
     (sum, a) => sum + (Number(a.purchase_cost) || 0),

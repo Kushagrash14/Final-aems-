@@ -20,8 +20,8 @@ type StatusFilter = 'ALL' | 'assigned' | 'available' | 'maintenance' | 'damaged'
 
 const STATUS_OPTIONS: { value: StatusFilter; label: string; matches: AssetCondition[] }[] = [
   { value: 'ALL', label: 'All Statuses', matches: [] },
-  { value: 'assigned', label: 'Assigned (with Employee)', matches: ['Assigned'] },
-  { value: 'available', label: 'Available (Stock + In-House)', matches: ['Available (Stock)', 'In-House'] },
+  { value: 'assigned', label: 'Assigned / In Use (Staff + In-House)', matches: ['Assigned', 'In-House'] },
+  { value: 'available', label: 'Available (Stock Pool)', matches: ['Available (Stock)'] },
   { value: 'maintenance', label: 'Under Maintenance', matches: ['Under Maintenance'] },
   { value: 'damaged', label: 'Damaged / Scrap', matches: ['Damaged', 'Scrapped'] },
   { value: 'missing', label: 'Missing / Lost', matches: ['Missing'] },

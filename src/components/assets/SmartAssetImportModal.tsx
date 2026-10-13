@@ -24,6 +24,7 @@ import {
   Building2,
   MapPin,
   HelpCircle,
+  SkipForward,
 } from 'lucide-react';
 import { Location, Plant, Department, Employee, Asset } from '@/types/database';
 import { isItDepartmentName } from '@/lib/assetType';
@@ -41,6 +42,7 @@ export interface SmartAssetImportModalProps {
     assets_created: number;
     employees_created: number;
     assets_in_stock: number;
+    assets_in_house?: number;
     assets_assigned: number;
     imported_tags: string[];
     skipped_rows?: Array<{ serial_number: string; reason: string }>;
@@ -81,6 +83,8 @@ interface ParsedImportRow {
   willCreateEmployee?: boolean;
   isAssigned?: boolean;
   isStock?: boolean;
+  isSkipped?: boolean;
+  skipReason?: string;
 }
 
 // Dynamic Theme Palette Generator based on Department Name
@@ -253,7 +257,8 @@ export default function SmartAssetImportModal({
 
   // Parsed and analyzed rows
   const [parsedRows, setParsedRows] = useState<ParsedImportRow[]>([]);
-  const [activeTab, setActiveTab] = useState<'all' | 'valid' | 'warning' | 'error'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'valid' | 'skipped' | 'warning' | 'error'>('all');
+  const [unassignedCustody, setUnassignedCustody] = useState<'in_house' | 'in_storage'>('in_house');
 
   // Import Submission State
   const [importing, setImporting] = useState(false);
@@ -262,6 +267,7 @@ export default function SmartAssetImportModal({
     assets_created: number;
     employees_created: number;
     assets_in_stock: number;
+    assets_in_house?: number;
     assets_assigned: number;
     imported_tags: string[];
     created_employees: Array<{ id: string; emp_code: string; full_name: string }>;
@@ -462,7 +468,8 @@ export default function SmartAssetImportModal({
   };
 
   // 2. Multi-Stage Security Quarantine & Integrity Scanning
-  const processUploadedFile = async (file: File) => {
+  const processUploadedFile = async (file: File, custodyOverride?: 'in_house' | 'in_storage') => {
+    const currentCustody = custodyOverride || unassignedCustody;
     setIsScanning(true);
     setSecurityScanPassed(null);
     setSecurityScanAlert(null);
@@ -584,17 +591,23 @@ export default function SmartAssetImportModal({
         let willCreateEmployee = false;
         let isAssigned = false;
         let isStock = false;
+        let isSkipped = false;
+        let skipReason: string | undefined = undefined;
 
         // Validation Checks
         if (!name) {
-          status = 'error';
-          statusMessages.push('Missing Asset Name');
+          status = 'warning';
+          isSkipped = true;
+          skipReason = 'Missing Asset Name';
+          statusMessages.push('Missing Asset Name ➔ Auto-Skipped');
         }
 
         const cleanSerial = serial_number.toUpperCase();
         if (!cleanSerial) {
-          status = 'error';
-          statusMessages.push('Missing Serial Number');
+          status = 'warning';
+          isSkipped = true;
+          skipReason = 'Missing Serial Number';
+          statusMessages.push('Missing Serial Number ➔ Auto-Skipped');
         } else {
           // Check for Excel formula injection in serial or name
           if (/^[=+\-@]/.test(serial_number) || /^[=+\-@]/.test(name)) {
@@ -604,42 +617,58 @@ export default function SmartAssetImportModal({
 
           // Check duplicate in current sheet
           if (seenSerialsInSheet.has(cleanSerial)) {
-            status = 'error';
-            statusMessages.push(`Duplicate Serial in this sheet: "${cleanSerial}"`);
+            status = 'warning';
+            isSkipped = true;
+            skipReason = `Duplicate Serial in this sheet: "${cleanSerial}"`;
+            statusMessages.push(`Duplicate Serial in this sheet ("${cleanSerial}") ➔ Auto-Skipped`);
           } else {
             seenSerialsInSheet.add(cleanSerial);
           }
 
           // Check duplicate against existing database
           if (existingDbSerials.has(cleanSerial)) {
-            status = 'error';
-            statusMessages.push(`Serial already registered in AEMS database: "${cleanSerial}"`);
+            status = 'warning';
+            isSkipped = true;
+            skipReason = `Serial already registered in AEMS database: "${cleanSerial}"`;
+            statusMessages.push(`Serial already registered in AEMS database ("${cleanSerial}") ➔ Auto-Skipped`);
           }
         }
 
-        // Employee Custodian checks
+        // Employee Custodian checks (only if not skipped)
         const cleanEmpCode = emp_code.toUpperCase();
-        if (cleanEmpCode) {
-          if (existingDbEmpCodes.has(cleanEmpCode)) {
-            const emp = existingDbEmpCodes.get(cleanEmpCode)!;
-            if (emp.status === 'inactive' || (emp.status as string) === 'resigned') {
-              if (status !== 'error') status = 'warning';
-              statusMessages.push(`Staff ${cleanEmpCode} is INACTIVE → Will safely route to In Stock`);
-              isStock = true;
+        const cleanEmpName = (emp_name || '').toUpperCase();
+        const IN_HOUSE_IDENTIFIERS = ['IN HOUSE', 'IN-HOUSE', 'INHOUSE', 'DEPARTMENT', 'DEPT', 'PLANT', 'N/A', 'NA', 'NONE'];
+        const isExplicitInHouse =
+          (cleanEmpCode && IN_HOUSE_IDENTIFIERS.includes(cleanEmpCode)) ||
+          (cleanEmpName && IN_HOUSE_IDENTIFIERS.includes(cleanEmpName));
+
+        if (!isSkipped) {
+          if (cleanEmpCode && !isExplicitInHouse) {
+            if (existingDbEmpCodes.has(cleanEmpCode)) {
+              const emp = existingDbEmpCodes.get(cleanEmpCode)!;
+              if (emp.status === 'inactive' || (emp.status as string) === 'resigned') {
+                if (status !== 'error') status = 'warning';
+                statusMessages.push(`Staff ${cleanEmpCode} is INACTIVE → Will safely route to In Stock`);
+                isStock = true;
+              } else {
+                isAssigned = true;
+                statusMessages.push(`Assigned to: ${emp.full_name} (${cleanEmpCode})`);
+              }
             } else {
+              // Brand new employee auto-provisioning!
+              willCreateEmployee = true;
               isAssigned = true;
-              statusMessages.push(`Assigned to: ${emp.full_name} (${cleanEmpCode})`);
+              statusMessages.push(`Auto-Provision: New profile will be created for "${emp_name || cleanEmpCode}"`);
             }
           } else {
-            // Brand new employee auto-provisioning!
-            willCreateEmployee = true;
-            isAssigned = true;
-            statusMessages.push(`Auto-Provision: New profile will be created for "${emp_name || cleanEmpCode}"`);
+            // No employee code or explicit IN HOUSE
+            if (isExplicitInHouse || currentCustody === 'in_house') {
+              statusMessages.push('Assigned: In-House (Department Custody)');
+            } else {
+              isStock = true;
+              statusMessages.push('Unassigned: Will be added directly to In Stock pool');
+            }
           }
-        } else {
-          // No employee code -> direct stock pool
-          isStock = true;
-          statusMessages.push('Unassigned: Will be added directly to In Stock pool');
         }
 
         analyzed.push({
@@ -672,6 +701,8 @@ export default function SmartAssetImportModal({
           willCreateEmployee,
           isAssigned,
           isStock,
+          isSkipped,
+          skipReason,
         });
       });
 
@@ -689,15 +720,21 @@ export default function SmartAssetImportModal({
 
   // Stat Counters
   const totalRowsCount = parsedRows.length;
-  const validRowsCount = parsedRows.filter((r) => r.status === 'valid').length;
-  const warningRowsCount = parsedRows.filter((r) => r.status === 'warning').length;
+  const skippedRowsCount = parsedRows.filter((r) => r.isSkipped).length;
   const errorRowsCount = parsedRows.filter((r) => r.status === 'error').length;
-  const newStaffCount = parsedRows.filter((r) => r.willCreateEmployee).length;
-  const stockCount = parsedRows.filter((r) => r.isStock).length;
-  const assignedCount = parsedRows.filter((r) => r.isAssigned).length;
+  const validRowsCount = parsedRows.filter((r) => r.status === 'valid' && !r.isSkipped).length;
+  const warningRowsCount = parsedRows.filter((r) => r.status === 'warning' && !r.isSkipped).length;
+  const newStaffCount = parsedRows.filter((r) => r.willCreateEmployee && !r.isSkipped).length;
+  const stockCount = parsedRows.filter((r) => r.isStock && !r.isSkipped).length;
+  const assignedCount = parsedRows.filter((r) => r.isAssigned && !r.isSkipped).length;
+
+  const importableRows = useMemo(() => {
+    return parsedRows.filter((r) => !r.isSkipped && r.status !== 'error');
+  }, [parsedRows]);
+  const importableCount = importableRows.length;
 
   const canExecuteImport =
-    totalRowsCount > 0 &&
+    importableCount > 0 &&
     errorRowsCount === 0 &&
     securityScanPassed === true &&
     Boolean(selectedLocationId) &&
@@ -706,8 +743,9 @@ export default function SmartAssetImportModal({
 
   // Filtered rows for active tab
   const displayRows = useMemo(() => {
-    if (activeTab === 'valid') return parsedRows.filter((r) => r.status === 'valid');
-    if (activeTab === 'warning') return parsedRows.filter((r) => r.status === 'warning');
+    if (activeTab === 'valid') return parsedRows.filter((r) => !r.isSkipped && r.status === 'valid');
+    if (activeTab === 'skipped') return parsedRows.filter((r) => r.isSkipped);
+    if (activeTab === 'warning') return parsedRows.filter((r) => !r.isSkipped && r.status === 'warning');
     if (activeTab === 'error') return parsedRows.filter((r) => r.status === 'error');
     return parsedRows;
   }, [parsedRows, activeTab]);
@@ -718,7 +756,7 @@ export default function SmartAssetImportModal({
 
     setImporting(true);
     try {
-      const itemsPayload = parsedRows.map((r) => ({
+      const itemsPayload = importableRows.map((r) => ({
         name: r.name,
         category_name: r.category_name,
         manufacturer: r.manufacturer,
@@ -752,6 +790,7 @@ export default function SmartAssetImportModal({
           plant_id: selectedPlantId,
           department_id: departmentId,
           items: itemsPayload,
+          unassigned_custody: unassignedCustody,
         }),
       });
 
@@ -760,9 +799,20 @@ export default function SmartAssetImportModal({
         throw new Error(data.error || 'Failed to complete batch import');
       }
 
-      setImportResult(data);
+      // Merge client-side auto-skipped rows so user sees complete transparent report
+      const clientSkipped = parsedRows
+        .filter((r) => r.isSkipped)
+        .map((r) => ({
+          serial_number: r.serial_number || `Row #${r.rowNum}`,
+          reason: r.skipReason || 'Duplicate or invalid serial auto-skipped',
+        }));
+
+      const combinedSkipped = [...(data.skipped_rows || []), ...clientSkipped];
+      const finalResult = { ...data, skipped_rows: combinedSkipped };
+
+      setImportResult(finalResult);
       if (onImportSuccess) {
-        onImportSuccess(data);
+        onImportSuccess(finalResult);
       }
     } catch (err: any) {
       console.error('Import execution error:', err);
@@ -824,10 +874,15 @@ export default function SmartAssetImportModal({
               </div>
 
               {/* Result Summary Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-white p-3 rounded-xl border border-slate-200 shadow-2xs text-left">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 bg-white p-3 rounded-xl border border-slate-200 shadow-2xs text-left">
                 <div className="p-2 bg-slate-50 rounded-lg border border-slate-100">
                   <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Created</p>
                   <p className="text-base font-black text-slate-900 mt-0.5">{importResult.assets_created}</p>
+                </div>
+
+                <div className="p-2 bg-teal-50 rounded-lg border border-teal-100">
+                  <p className="text-[9px] font-bold text-teal-600 uppercase tracking-wider">In-House</p>
+                  <p className="text-base font-black text-teal-700 mt-0.5">{importResult.assets_in_house ?? 0}</p>
                 </div>
 
                 <div className="p-2 bg-emerald-50 rounded-lg border border-emerald-100">
@@ -940,6 +995,26 @@ export default function SmartAssetImportModal({
                     <span className="font-extrabold text-[11px] text-slate-900 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
                       {departmentName}
                     </span>
+                  </div>
+
+                  {/* Unassigned Custody Option */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-extrabold text-slate-500 uppercase">Unassigned Custody:</span>
+                    <select
+                      value={unassignedCustody}
+                      onChange={(e) => {
+                        const nextVal = e.target.value as 'in_house' | 'in_storage';
+                        setUnassignedCustody(nextVal);
+                        if (selectedFile) {
+                          processUploadedFile(selectedFile, nextVal);
+                        }
+                      }}
+                      className="text-xs font-bold px-2 py-1 rounded-lg border border-slate-300 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+                      title="Choose custody for equipment without an assigned employee code"
+                    >
+                      <option value="in_house">Assigned: In-House (Department Custody)</option>
+                      <option value="in_storage">Available / In Stock (Storage Pool)</option>
+                    </select>
                   </div>
                 </div>
 
@@ -1083,7 +1158,7 @@ export default function SmartAssetImportModal({
                   </div>
 
                   {/* Compact Stats Strip */}
-                  <div className="grid grid-cols-5 gap-1.5 text-center">
+                  <div className={`grid ${errorRowsCount > 0 ? 'grid-cols-6' : 'grid-cols-5'} gap-1.5 text-center`}>
                     <div className="p-1.5 bg-white rounded-lg border border-slate-200">
                       <p className="text-[9px] font-black text-slate-400 uppercase">Total</p>
                       <p className="text-sm font-black text-slate-900">{totalRowsCount}</p>
@@ -1099,20 +1174,38 @@ export default function SmartAssetImportModal({
                       <p className="text-sm font-black text-blue-700">{newStaffCount}</p>
                     </div>
 
-                    <div className="p-1.5 bg-white rounded-lg border border-amber-200">
-                      <p className="text-[9px] font-black text-amber-600 uppercase">To Stock</p>
-                      <p className="text-sm font-black text-amber-700">{stockCount}</p>
+                    <div className="p-1.5 bg-white rounded-lg border border-teal-200">
+                      <p className="text-[9px] font-black text-teal-600 uppercase">
+                        {unassignedCustody === 'in_house' ? 'In-House' : 'To Stock'}
+                      </p>
+                      <p className="text-sm font-black text-teal-700">{stockCount}</p>
                     </div>
 
-                    <div className="p-1.5 bg-white rounded-lg border border-rose-200">
-                      <p className="text-[9px] font-black text-rose-600 uppercase">Errors</p>
-                      <p className="text-sm font-black text-rose-700">{errorRowsCount}</p>
+                    <div className={`p-1.5 bg-white rounded-lg border ${skippedRowsCount > 0 ? 'border-amber-300 bg-amber-50/40' : 'border-slate-200'}`}>
+                      <p className="text-[9px] font-black text-amber-600 uppercase">Auto-Skip</p>
+                      <p className="text-sm font-black text-amber-700">{skippedRowsCount}</p>
                     </div>
+
+                    {errorRowsCount > 0 && (
+                      <div className="p-1.5 bg-white rounded-lg border border-rose-200">
+                        <p className="text-[9px] font-black text-rose-600 uppercase">Errors</p>
+                        <p className="text-sm font-black text-rose-700">{errorRowsCount}</p>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Warning / Error inline strips */}
+                  {/* Warning / Skip inline strips */}
+                  {skippedRowsCount > 0 && (
+                    <div className="p-1.5 px-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-[10px] font-semibold flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                      <span>
+                        <strong>{skippedRowsCount} duplicate/existing asset(s)</strong> detected ➔ <strong>Automatically skipped</strong>. The remaining <strong>{importableCount} clean assets</strong> will be safely imported!
+                      </span>
+                    </div>
+                  )}
+
                   {warningRowsCount > 0 && (
-                    <div className="p-1.5 px-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-[10px] font-semibold flex items-center gap-1.5">
+                    <div className="p-1.5 px-2.5 rounded-lg bg-amber-50/60 border border-amber-200 text-amber-800 text-[10px] font-semibold flex items-center gap-1.5">
                       <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                       <span>{warningRowsCount} asset(s) linked to inactive staff will safely route to In Stock pool.</span>
                     </div>
@@ -1121,7 +1214,7 @@ export default function SmartAssetImportModal({
                   {errorRowsCount > 0 && (
                     <div className="p-1.5 px-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-[10px] font-bold flex items-center gap-1.5">
                       <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                      <span>{errorRowsCount} error(s) detected (duplicate serials or missing names). Must be resolved.</span>
+                      <span>{errorRowsCount} formula/injection error(s) detected. Must be resolved before importing.</span>
                     </div>
                   )}
 
@@ -1152,6 +1245,17 @@ export default function SmartAssetImportModal({
                         >
                           Valid ({validRowsCount})
                         </button>
+                        {skippedRowsCount > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab('skipped')}
+                            className={`px-2 py-0.5 rounded text-[9px] font-bold cursor-pointer transition-colors ${
+                              activeTab === 'skipped' ? 'bg-amber-600 text-white' : 'text-amber-700 hover:bg-amber-50'
+                            }`}
+                          >
+                            Skipped ({skippedRowsCount})
+                          </button>
+                        )}
                         {warningRowsCount > 0 && (
                           <button
                             type="button"
@@ -1194,25 +1298,34 @@ export default function SmartAssetImportModal({
                             <tr
                               key={row.rowNum}
                               className={`hover:bg-slate-50/80 transition-colors ${
-                                row.status === 'error' ? 'bg-rose-50/40' : row.status === 'warning' ? 'bg-amber-50/30' : ''
+                                row.isSkipped
+                                  ? 'bg-amber-50/25 opacity-70'
+                                  : row.status === 'error'
+                                  ? 'bg-rose-50/40'
+                                  : row.status === 'warning'
+                                  ? 'bg-amber-50/30'
+                                  : ''
                               }`}
                             >
                               <td className="py-1.5 px-2.5 font-mono text-slate-400 text-[10px]">#{row.rowNum}</td>
 
                               <td className="py-1.5 px-2.5 shrink-0">
-                                {row.status === 'valid' && (
+                                {row.isSkipped ? (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-extrabold bg-amber-50 text-amber-700 border border-amber-200" title="This row will be skipped during import">
+                                    <SkipForward className="w-2.5 h-2.5" />
+                                    Auto-Skip
+                                  </span>
+                                ) : row.status === 'valid' ? (
                                   <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">
                                     <Check className="w-2.5 h-2.5" />
                                     Valid
                                   </span>
-                                )}
-                                {row.status === 'warning' && (
+                                ) : row.status === 'warning' ? (
                                   <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-extrabold bg-amber-50 text-amber-700 border border-amber-200">
                                     <AlertTriangle className="w-2.5 h-2.5" />
                                     Warn
                                   </span>
-                                )}
-                                {row.status === 'error' && (
+                                ) : (
                                   <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-extrabold bg-rose-50 text-rose-700 border border-rose-200">
                                     <AlertCircle className="w-2.5 h-2.5" />
                                     Error
@@ -1239,7 +1352,12 @@ export default function SmartAssetImportModal({
                               </td>
 
                               <td className="py-1.5 px-2.5">
-                                {row.willCreateEmployee ? (
+                                {row.isSkipped ? (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-md italic">
+                                    <SkipForward className="w-2.5 h-2.5 text-slate-400" />
+                                    Skipped
+                                  </span>
+                                ) : row.willCreateEmployee ? (
                                   <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded-md border border-blue-200">
                                     <Users className="w-2.5 h-2.5 text-blue-600" />
                                     Auto-Create: {row.emp_name || row.emp_code}
@@ -1252,7 +1370,7 @@ export default function SmartAssetImportModal({
                                 ) : (
                                   <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded-md">
                                     <Box className="w-2.5 h-2.5 text-slate-500" />
-                                    In Stock
+                                    {unassignedCustody === 'in_house' ? 'In-House' : 'In Stock'}
                                   </span>
                                 )}
                               </td>
@@ -1262,7 +1380,9 @@ export default function SmartAssetImportModal({
                                   <p
                                     key={i}
                                     className={
-                                      row.status === 'error'
+                                      row.isSkipped
+                                        ? 'text-amber-700 font-bold'
+                                        : row.status === 'error'
                                         ? 'text-rose-600 font-bold'
                                         : row.status === 'warning'
                                         ? 'text-amber-700'
@@ -1317,7 +1437,7 @@ export default function SmartAssetImportModal({
                 ) : (
                   <>
                     <Sparkles className="w-3.5 h-3.5" />
-                    <span>Confirm &amp; Import ({validRowsCount + warningRowsCount})</span>
+                    <span>Confirm &amp; Import ({importableCount})</span>
                   </>
                 )}
               </button>

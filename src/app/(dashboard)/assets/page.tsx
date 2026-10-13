@@ -433,10 +433,13 @@ const DEFAULT_DEPT_CATEGORIES: Record<string, string[]> = {
         const isAssigned = asset.status === 'in_service' && hasEmp;
         const isStock = asset.status === 'in_storage';
 
+        if (selectedStatus === 'IN_USE' && asset.status !== 'in_service') {
+          return false;
+        }
         if (selectedStatus === 'IN_HOUSE' && !isInHouse) {
           return false;
         }
-        if (selectedStatus === 'IN_USE' && !isAssigned) {
+        if (selectedStatus === 'STAFF' && !isAssigned) {
           return false;
         }
         if (selectedStatus === 'AVAILABLE' && !isStock) {
@@ -883,8 +886,9 @@ const DEFAULT_DEPT_CATEGORIES: Record<string, string[]> = {
                   className="px-1.5 py-0.5 bg-slate-50 border border-slate-300 rounded text-[10px] font-semibold text-slate-700 cursor-pointer shadow-2xs"
                 >
                   <option value="ALL">All Status</option>
-                  <option value="IN_HOUSE">In-House Active</option>
-                  <option value="IN_USE">Assigned to Employee</option>
+                  <option value="IN_USE">Assigned / In Use (All)</option>
+                  <option value="IN_HOUSE">Assigned: In-House Dept Custody</option>
+                  <option value="STAFF">Assigned: Staff Custodian</option>
                   <option value="AVAILABLE">Stock Inventory Pool</option>
                   <option value="MAINTENANCE">Maintenance</option>
                   <option value="SCRAPPED">Scrapped / Damaged</option>
@@ -1071,9 +1075,9 @@ const DEFAULT_DEPT_CATEGORIES: Record<string, string[]> = {
                         </span>
                       ) : isInHouse ? (
                         <div className="space-y-0.5">
-                          <span className="inline-flex items-center gap-1 text-[10px] font-black text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 uppercase">
-                            <Building2 className="w-3 h-3 text-emerald-600" />
-                            <span>In-House Active</span>
+                          <span className="inline-flex items-center gap-1 text-[10px] font-black text-blue-800 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 uppercase">
+                            <Building2 className="w-3 h-3 text-blue-600" />
+                            <span>Assigned (In-House)</span>
                           </span>
                           <div className="text-[10px] font-bold text-slate-600">
                             {a.department?.name || 'Department Custody'}
@@ -1101,16 +1105,16 @@ const DEFAULT_DEPT_CATEGORIES: Record<string, string[]> = {
                             : a.status === 'maintenance'
                             ? 'bg-amber-50 text-amber-700 border-amber-200'
                             : isInHouse
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200 font-bold'
+                            ? 'bg-blue-50 text-blue-700 border-blue-200 font-bold'
                             : isStock
                             ? 'bg-amber-50 text-amber-700 border-amber-200'
                             : 'bg-blue-50 text-blue-700 border-blue-200'
                         }`}
                       >
                         {isInHouse
-                          ? 'IN-HOUSE ACTIVE'
+                          ? 'ASSIGNED (IN-HOUSE)'
                           : a.status === 'in_service'
-                          ? 'IN USE'
+                          ? 'ASSIGNED (STAFF)'
                           : a.status === 'in_storage'
                           ? 'AVAILABLE IN STOCK'
                           : a.status.toUpperCase()}

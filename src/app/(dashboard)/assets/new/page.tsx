@@ -4504,8 +4504,13 @@ function AssetWizardContent() {
           plants={plants.length > 0 ? plants : SEED_PLANTS}
           departments={departments}
           onImportSuccess={(res) => {
+            const counts = [
+              res.assets_assigned ? `${res.assets_assigned} assigned` : null,
+              res.assets_in_house ? `${res.assets_in_house} in-house` : null,
+              res.assets_in_stock ? `${res.assets_in_stock} in stock` : null,
+            ].filter(Boolean).join(', ');
             setSuccessToast(
-              `Batch Import Committed! ${res.assets_created} assets imported (${res.assets_assigned} assigned, ${res.assets_in_stock} in stock). ${res.employees_created} new staff profiles provisioned.` +
+              `Batch Import Committed! ${res.assets_created} assets imported (${counts || '0 assigned'}). ${res.employees_created} new staff profiles provisioned.` +
                 (res.skipped_rows?.length ? ` ${res.skipped_rows.length} row(s) skipped (duplicate serial / conflict).` : '')
             );
             setTimeout(() => setSuccessToast(null), 6000);

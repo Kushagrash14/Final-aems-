@@ -77,8 +77,8 @@ function addToCounts(c: Counts, condition: AssetCondition, cost: number) {
   c.total += 1;
   c.cost += cost;
   if (condition === 'Assigned') c.assigned += 1;
+  else if (condition === 'In-House') { c.inHouse += 1; c.assigned += 1; }
   else if (condition === 'Available (Stock)') { c.stock += 1; c.available += 1; }
-  else if (condition === 'In-House') { c.inHouse += 1; c.available += 1; }
   else if (condition === 'Under Maintenance') c.maintenance += 1;
   else if (condition === 'Damaged' || condition === 'Scrapped') c.damaged += 1;
   else if (condition === 'Missing') c.missing += 1;
@@ -128,10 +128,10 @@ export function exportAssetsToExcel(opts: AssetExportOptions): number {
     [],
     ['ASSET SUMMARY', 'COUNT'],
     ['Total Assets', totals.total],
-    ['Assigned (with Employee)', totals.assigned],
-    ['Available (Stock + In-House)', totals.available],
-    ['   - Stock Pool', totals.stock],
-    ['   - In-House (Department use)', totals.inHouse],
+    ['Assigned / In Use (Staff + In-House)', totals.assigned],
+    ['   - Staff Custodians', totals.assigned - totals.inHouse],
+    ['   - In-House (Department Custody)', totals.inHouse],
+    ['Available in Stock', totals.stock],
     ['Under Maintenance', totals.maintenance],
     ['Damaged / Scrap', totals.damaged],
     ['Missing / Lost', totals.missing],

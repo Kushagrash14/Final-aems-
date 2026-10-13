@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import { Asset, Plant } from '@/types/database';
+import { Asset, Plant, Location } from '@/types/database';
 import ChartCard, { EmptyState } from './ChartCard';
 import BarChartFrame, { BarGroup } from './BarChartFrame';
 import MetricStrip, { formatShortRupee } from './MetricStrip';
@@ -10,6 +10,7 @@ import { useDrillDown } from './DrillDownContext';
 interface AssetValueByPlantChartProps {
   assets: Asset[];
   plants: Plant[];
+  locations?: Location[];
 }
 
 const TOTAL_BAR = 'bg-gradient-to-t from-indigo-600 to-indigo-400';
@@ -17,28 +18,42 @@ const IN_USE_BAR = 'bg-gradient-to-t from-teal-500 to-emerald-300';
 
 const costOf = (a: Asset) => Number(a.purchase_cost) || 0;
 
-export default function AssetValueByPlantChart({ assets, plants }: AssetValueByPlantChartProps) {
+export default function AssetValueByPlantChart({ assets, plants, locations }: AssetValueByPlantChartProps) {
   const { openAssets } = useDrillDown();
+
+  const locMap = useMemo(() => {
+    const map = new Map<string, string>();
+    (locations || []).forEach((l) => map.set(l.id, l.name));
+    return map;
+  }, [locations]);
+
+  const getLocName = (p: Plant) => p.location?.name || locMap.get(p.location_id) || '';
 
   const stats = useMemo(() => {
     const live = assets.filter((a) => a.status !== 'scrapped');
     const sum = (list: Asset[]) => list.reduce((s, a) => s + costOf(a), 0);
 
-    const groups: BarGroup[] = [...plants]
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .map((p) => {
-        const list = live.filter((a) => a.current_plant_id === p.id);
-        const total = sum(list);
-        const inUse = sum(list.filter((a) => a.status === 'in_service'));
-        return {
-          id: p.id,
-          label: p.name,
-          bars: [
-            { key: 'total', value: total, className: TOTAL_BAR, label: formatShortRupee(total) },
-            { key: 'inUse', value: inUse, className: IN_USE_BAR, label: formatShortRupee(inUse) },
-          ],
-        };
-      });
+    const sorted = [...plants].sort((a, b) => {
+      const nameCmp = a.name.localeCompare(b.name);
+      if (nameCmp !== 0) return nameCmp;
+      return getLocName(a).localeCompare(getLocName(b));
+    });
+
+    const groups: BarGroup[] = sorted.map((p) => {
+      const list = live.filter((a) => a.current_plant_id === p.id);
+      const total = sum(list);
+      const inUse = sum(list.filter((a) => a.status === 'in_service'));
+      const loc = getLocName(p);
+      return {
+        id: p.id,
+        label: p.name,
+        subLabel: loc,
+        bars: [
+          { key: 'total', value: total, className: TOTAL_BAR, label: formatShortRupee(total) },
+          { key: 'inUse', value: inUse, className: IN_USE_BAR, label: formatShortRupee(inUse) },
+        ],
+      };
+    });
 
     const total = sum(live);
     const inUse = sum(live.filter((a) => a.status === 'in_service'));
@@ -49,15 +64,17 @@ export default function AssetValueByPlantChart({ assets, plants }: AssetValueByP
       inStock: sum(live.filter((a) => a.status === 'in_storage')),
       utilisation: total ? Math.round((inUse / total) * 100) : 0,
     };
-  }, [assets, plants]);
+  }, [assets, plants, locMap]);
 
   const handleBarClick = (plantId: string, key: string) => {
     const plant = plants.find((p) => p.id === plantId);
+    const loc = plant ? getLocName(plant) : '';
+    const plantDisplayName = plant ? `${plant.name}${loc ? ` (${loc})` : ''}` : 'Plant';
     const list = assets.filter(
       (a) => a.current_plant_id === plantId && a.status !== 'scrapped' && (key === 'total' || a.status === 'in_service')
     );
     const value = list.reduce((s, a) => s + costOf(a), 0);
-    openAssets(`${plant?.name || 'Plant'} — ${key === 'total' ? 'Total Value' : 'In-Use Value'}`, list, `${list.length} assets worth ${formatShortRupee(value)}`);
+    openAssets(`${plantDisplayName} — ${key === 'total' ? 'Total Value' : 'In-Use Value'}`, list, `${list.length} assets worth ${formatShortRupee(value)}`);
   };
 
   return (

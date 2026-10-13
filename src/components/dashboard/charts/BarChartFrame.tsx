@@ -12,6 +12,7 @@ export interface BarDatum {
 export interface BarGroup {
   id: string;
   label: string;
+  subLabel?: string;
   bars: BarDatum[];
 }
 
@@ -127,9 +128,18 @@ export default function BarChartFrame({
         <div className="w-10 shrink-0" />
         <div className={`flex-1 flex justify-around ${grouped ? 'gap-3' : 'gap-2'}`}>
           {groups.map((g) => (
-            <span key={g.id} className="flex-1 min-w-0 text-center text-[11px] font-bold text-slate-800 leading-tight break-words line-clamp-2" title={g.label}>
-              {g.label}
-            </span>
+            <div
+              key={g.id}
+              className="flex-1 min-w-0 text-center leading-tight break-words px-0.5"
+              title={g.subLabel ? `${g.label} (${g.subLabel})` : g.label}
+            >
+              <div className="text-[11px] font-bold text-slate-800 truncate">{g.label}</div>
+              {g.subLabel && (
+                <div className="text-[9.5px] font-bold text-indigo-600 uppercase tracking-wide truncate">
+                  {g.subLabel}
+                </div>
+              )}
+            </div>
           ))}
         </div>
       </div>
